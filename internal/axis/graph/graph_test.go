@@ -1,6 +1,9 @@
 package graph
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // build assembles a small graph. Nodes are "file.go:Name" or
 // "file.go:Recv::Name"; edges are "a -> b".
@@ -199,4 +202,140 @@ func titles(fs []Finding) []string {
 		out[i] = f.Title
 	}
 	return out
+}
+
+func node(file, name, sig string) Node {
+	return Node{ID: file + ":" + name, Name: name, Qualified: name,
+		File: file, Kind: "function", Signature: sig}
+}
+
+func TestLayerCrossingsOnlyFlagDirectionsWithNoPrecedent(t *testing.T) {
+	// A dependency the repository already draws dozens of times is the
+	// architecture, not a violation of it.
+	nodes := []Node{
+		node("api/a.go", "Handler", "()"),
+		node("api/b.go", "Other", "()"),
+		node("core/c.go", "Helper", "()"),
+		node("secret/s.go", "Peek", "()"),
+		node("api/new.go", "Fresh", "()"),
+	}
+	g := build(t, nodes, [][2]string{
+		{"api/b.go:Other", "core/c.go:Helper"},   // api -> core has precedent
+		{"api/new.go:Fresh", "core/c.go:Helper"}, // so this is fine
+		{"api/new.go:Fresh", "secret/s.go:Peek"}, // api -> secret has none
+	})
+	changed := []Node{g.Nodes["api/new.go:Fresh"]}
+	nc := NewCallees{"api/new.go:Fresh": {"Helper": true, "Peek": true}}
+
+	got := LayerCrossings(g, changed, nc)
+	if len(got) != 1 {
+		t.Fatalf("got %v, want only the unprecedented direction", titles(got))
+	}
+	if !strings.Contains(got[0].Title, "secret/") {
+		t.Errorf("flagged the wrong direction: %s", got[0].Title)
+	}
+}
+
+func TestLayerCrossingIgnoresEdgesTheChangeDidNotDraw(t *testing.T) {
+	nodes := []Node{node("api/a.go", "Old", "()"), node("secret/s.go", "Peek", "()")}
+	g := build(t, nodes, [][2]string{{"api/a.go:Old", "secret/s.go:Peek"}})
+	changed := []Node{g.Nodes["api/a.go:Old"]}
+
+	if got := LayerCrossings(g, changed, NewCallees{}); len(got) != 0 {
+		t.Errorf("a pre-existing dependency is not this change's doing: %v", titles(got))
+	}
+}
+
+func TestSiblingDivergenceNeedsAnOverwhelmingConvention(t *testing.T) {
+	// A mixed directory says nothing, and asserting a convention from a slim
+	// majority would make the rule noise.
+	withCtx := func(i int) Node {
+		return node("svc/f.go", "Follower"+string(rune('A'+i)), "(ctx context.Context) error")
+	}
+	var nodes []Node
+	for i := 0; i < 5; i++ {
+		nodes = append(nodes, withCtx(i))
+	}
+	odd := node("svc/new.go", "Odd", "(n int) error")
+	nodes = append(nodes, odd)
+
+	g := build(t, nodes, nil)
+	changed := []Node{g.Nodes[odd.ID]}
+
+	got := SiblingDivergence(g, changed, 5, 0.8)
+	if len(got) != 1 {
+		t.Fatalf("got %v, want the ctx convention flagged", titles(got))
+	}
+	if !strings.Contains(got[0].Title, "context.Context") {
+		t.Errorf("wrong convention: %s", got[0].Title)
+	}
+
+	// The same divergence with too few neighbours proves nothing.
+	if got := SiblingDivergence(g, changed, 50, 0.8); len(got) != 0 {
+		t.Errorf("a directory this small cannot establish a convention: %v", titles(got))
+	}
+}
+
+func TestSiblingDivergenceIgnoresAConventionTheChangeItselfSets(t *testing.T) {
+	// Other functions in the same change cannot vouch for a convention.
+	var nodes []Node
+	for i := 0; i < 5; i++ {
+		nodes = append(nodes, node("svc/f.go", "New"+string(rune('A'+i)), "(ctx context.Context) error"))
+	}
+	odd := node("svc/new.go", "Odd", "(n int) error")
+	nodes = append(nodes, odd)
+	g := build(t, nodes, nil)
+
+	var allChanged []Node
+	for _, n := range nodes {
+		allChanged = append(allChanged, g.Nodes[n.ID])
+	}
+	if got := SiblingDivergence(g, allChanged, 5, 0.8); len(got) != 0 {
+		t.Errorf("the change cannot establish the convention it is judged against: %v", titles(got))
+	}
+}
+
+func TestConventionDetection(t *testing.T) {
+	tests := []struct {
+		sig       string
+		ctx, errs bool
+	}{
+		{"(ctx context.Context, n int) error", true, true},
+		{"(n int, ctx context.Context) error", false, true},
+		{"(ctx context.Context)", true, false},
+		{"(n int) (int, error)", false, true},
+		{"(n int) int", false, false},
+		// A func-typed parameter must not be mistaken for the end of the list.
+		{"(f func() error, n int) (string, error)", false, true},
+		{"(ctx context.Context, f func(int) int) error", true, true},
+	}
+	for _, tc := range tests {
+		n := Node{Signature: tc.sig}
+		if got := takesContextFirst(n); got != tc.ctx {
+			t.Errorf("%q: ctx-first = %v, want %v", tc.sig, got, tc.ctx)
+		}
+		if got := returnsError(n); got != tc.errs {
+			t.Errorf("%q: returns-error = %v, want %v", tc.sig, got, tc.errs)
+		}
+	}
+}
+
+func TestNodeShape(t *testing.T) {
+	m := Node{Name: "Do", Qualified: "Server::Do", File: "svc/a.go", Kind: "method"}
+	if m.Dir() != "svc/" {
+		t.Errorf("Dir() = %q", m.Dir())
+	}
+	if m.Label() != "(Server).Do" {
+		t.Errorf("Label() = %q", m.Label())
+	}
+	if m.Key() != "svc/a.go:(Server).Do" {
+		t.Errorf("Key() = %q", m.Key())
+	}
+	top := Node{Name: "F", Qualified: "F", File: "a.go", Kind: "function"}
+	if top.Dir() != "./" || top.Label() != "F" {
+		t.Errorf("root-level node: dir=%q label=%q", top.Dir(), top.Label())
+	}
+	if !top.IsFunc() || (Node{Kind: "struct"}).IsFunc() {
+		t.Error("IsFunc is wrong")
+	}
 }

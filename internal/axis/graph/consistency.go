@@ -282,19 +282,51 @@ func idSet(nodes []Node) map[string]bool {
 	return out
 }
 
+// takesContextFirst reports a context.Context as the first parameter.
 func takesContextFirst(n Node) bool {
-	s := strings.TrimPrefix(n.Signature, "(")
-	i := strings.IndexAny(s, ",)")
-	if i < 0 {
+	params, _, ok := splitSignature(n.Signature)
+	if !ok {
 		return false
 	}
-	return strings.Contains(s[:i], "context.Context")
+	first := params
+	if i := strings.Index(params, ","); i >= 0 {
+		first = params[:i]
+	}
+	return strings.Contains(first, "context.Context")
 }
 
+// returnsError reports an error anywhere in the result list.
+//
+// The results have to be found by matching the parameter list's parentheses. An
+// earlier version looked after the last ")" in the signature, which works for
+// "(n int) error" and silently fails for "(n int) (int, error)" — the shape
+// most Go functions that return an error actually have.
 func returnsError(n Node) bool {
-	i := strings.LastIndex(n.Signature, ")")
-	if i < 0 || i+1 >= len(n.Signature) {
+	_, results, ok := splitSignature(n.Signature)
+	if !ok {
 		return false
 	}
-	return strings.Contains(n.Signature[i+1:], "error")
+	return strings.Contains(results, "error")
+}
+
+// splitSignature separates "(params) results", tracking nesting so a func-typed
+// parameter does not end the list early.
+func splitSignature(sig string) (params, results string, ok bool) {
+	sig = strings.TrimSpace(sig)
+	if !strings.HasPrefix(sig, "(") {
+		return "", "", false
+	}
+	depth := 0
+	for i, r := range sig {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return sig[1:i], strings.TrimSpace(sig[i+1:]), true
+			}
+		}
+	}
+	return "", "", false
 }
