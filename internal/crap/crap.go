@@ -118,8 +118,30 @@ func (r Ranked) Crappy() bool { return r.Scored() && r.CRAP > Threshold }
 // complexity 6 passes a threshold of 15 comfortably; if a fifth of the mutants
 // in it survive, it is still the most dangerous thing in the change.
 func Apply(results []*axis.Result) {
+	var complexityRan, mutationRan bool
+	for _, r := range results {
+		switch r.AxisID {
+		case "complexity":
+			complexityRan = true
+		case "mutation":
+			mutationRan = len(r.Funcs) > 0
+		}
+	}
+
 	ranked := Rank(results)
 	if len(ranked) == 0 {
+		return
+	}
+	if complexityRan && !mutationRan {
+		// Silence is what makes a missing number look like a passing one. If
+		// the risk ranking cannot be computed, say so where the complexity
+		// findings would have been ranked.
+		for _, r := range results {
+			if r.AxisID == "complexity" {
+				r.Notes = append(r.Notes,
+					"risk ranking needs the mutation axis — add --axes all")
+			}
+		}
 		return
 	}
 	byKey := make(map[string]Ranked, len(ranked))

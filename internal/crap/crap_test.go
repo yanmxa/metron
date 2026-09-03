@@ -152,3 +152,19 @@ func TestApplyAnnotatesAndReordersExistingFindings(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return indexOf(s, sub) >= 0 }
+
+func TestMissingMutationIsSaidOutLoud(t *testing.T) {
+	// Printing nothing is what made this look unimplemented. An absent score
+	// has to announce itself, the same as an axis that cannot run.
+	complexity := &axis.Result{AxisID: "complexity", Funcs: []axis.PerFunc{
+		{Path: "a.go", Function: "F", Cyclomatic: 12},
+	}}
+	Apply([]*axis.Result{complexity})
+
+	if len(complexity.Notes) != 1 || !contains(complexity.Notes[0], "mutation") {
+		t.Errorf("notes = %v, want one explaining the ranking is unavailable", complexity.Notes)
+	}
+	if _, ok := complexity.Diagnostics["complexity.crap_max"]; ok {
+		t.Error("no score should be published when nothing was measured")
+	}
+}
