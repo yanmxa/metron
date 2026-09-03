@@ -515,7 +515,10 @@ func (a *Axis) observations(ms []Mutant) []axis.Observation {
 	for _, m := range live {
 		out = append(out, axis.Observation{
 			Path: m.File, Line: m.Line, Kind: "survived-mutant",
-			Title:  fmt.Sprintf("no test caught this change to %s (%s)", m.Function, m.Operator),
+			Title: fmt.Sprintf("no test caught this change to %s (%s)", m.Function, m.Operator),
+			// The guidance, not the diff, is the actionable half: it names the
+			// case that is missing instead of leaving it to be inferred.
+			Detail: m.Guidance,
 			Before: m.Before, After: m.After,
 		})
 	}

@@ -84,6 +84,28 @@ single deliberate edit. A mutant is *detected* if any test fails or hangs.
       + if total <= 0 {
 ```
 
+
+Each survivor carries the assertion it proves is missing, derived from the
+operator and its operands:
+
+```
+  mutation
+    pricing/pricing.go:9  no test caught this change to Quote (CONDITIONALS_BOUNDARY)
+      - if total < 0 {
+      + if total <= 0 {
+      assert the behaviour at the boundary total == 0
+```
+
+That last line is the point. `--format json` carries it as `detail`, so an agent
+iterating against metron gets a concrete, verifiable task rather than a number it
+has to interpret. It is derived, not generated — no model is involved, and the
+same commit always produces the same instruction.
+
+It is phrased as an assertion to add, never as a claim about what the tests do. A
+survivor cannot tell "this input is never supplied" from "it is supplied and the
+result is never checked", and saying the first when it is the second sends you to
+write a test that already exists.
+
 **Uncovered code counts against the score.** The dominant failure in
 agent-written code is 200 new lines with 20 tested well. Leaving uncovered
 mutants out of the denominator scores that near-perfect, and it is gamed by

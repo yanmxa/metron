@@ -16,22 +16,27 @@ import (
 // blocks still map, compiler positions still mean something, and the report
 // show an exact before/after pair.
 type Mutant struct {
-	ID          string   `json:"id"`
-	Operator    string   `json:"operator"`
-	File        string   `json:"file"` // repo-relative
-	Package     string   `json:"package"`
-	Function    string   `json:"function"`
-	Line        int      `json:"line"`
-	Col         int      `json:"col"`
-	Start       int      `json:"-"` // byte offsets into the original source
-	End         int      `json:"-"`
-	Replacement string   `json:"-"`
-	Before      string   `json:"before"` // the original line
-	After       string   `json:"after"`  // the mutated line
-	Outcome     Outcome  `json:"outcome"`
-	KilledBy    []string `json:"killedBy,omitempty"`
-	Detail      string   `json:"detail,omitempty"`
-	DurationMS  int64    `json:"durationMs"`
+	ID          string `json:"id"`
+	Operator    string `json:"operator"`
+	File        string `json:"file"` // repo-relative
+	Package     string `json:"package"`
+	Function    string `json:"function"`
+	Line        int    `json:"line"`
+	Col         int    `json:"col"`
+	Start       int    `json:"-"` // byte offsets into the original source
+	End         int    `json:"-"`
+	Replacement string `json:"-"`
+	Before      string `json:"before"` // the original line
+	After       string `json:"after"`  // the mutated line
+	// Guidance is the test this mutant proves is missing, derived from the
+	// operator and the expression it rewrote. A survivor is not merely "add a
+	// test" — the operator says exactly which case nothing exercises, and that
+	// is knowable without asking anyone.
+	Guidance   string   `json:"guidance,omitempty"`
+	Outcome    Outcome  `json:"outcome"`
+	KilledBy   []string `json:"killedBy,omitempty"`
+	Detail     string   `json:"detail,omitempty"`
+	DurationMS int64    `json:"durationMs"`
 }
 
 // computeID derives a content hash so a mutant keeps its identity across runs,

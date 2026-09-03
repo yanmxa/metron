@@ -225,3 +225,131 @@ func f(a, b int) bool {
 		}
 	}
 }
+
+func TestSurvivorsSayWhichCaseIsMissing(t *testing.T) {
+	// A surviving mutant is a specification for the absent assertion. Which one
+	// follows from the operator and its operands, so metron can state it rather
+	// than leaving an agent to infer it.
+	//
+	// Phrased as what to assert, never as a claim about what the tests do: a
+	// survivor does not prove the input is unreached, only that nothing checks
+	// the difference. The fixture below is exactly that case — a test passes
+	// "gold" and never asserts the discount.
+	tests := []struct {
+		name string
+		src  string
+		op   string
+		want string
+	}{
+		{
+			"boundary names the exact value",
+			"package p\nfunc f(total int) bool { return total < 0 }\n",
+			OpConditionalsBoundary,
+			"assert the behaviour at the boundary total == 0",
+		},
+		{
+			"forcing true leaves the false side unchecked",
+			"package p\nfunc f(n int) int { if n > 5 { return 1 }; return 0 }\n",
+			OpConditionForce,
+			"assert the behaviour that depends on n > 5 being false",
+		},
+		{
+			"a dropped error names the assertion to add",
+			"package p\nfunc f(err error) error { if err != nil { return err }; return nil }\n",
+			OpNilErrorReturn,
+			"assert that this path returns a non-nil error",
+		},
+		{
+			"an unobserved call names itself",
+			"package p\nfunc f() { work() }\nfunc work() {}\n",
+			OpRemoveStatement,
+			"assert the effect of work()",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ms, _ := gen(t, tc.src, tc.op)
+			if len(ms) == 0 {
+				t.Fatal("no mutants generated")
+			}
+			for _, m := range ms {
+				if m.Guidance == tc.want {
+					return
+				}
+			}
+			var got []string
+			for _, m := range ms {
+				got = append(got, m.Guidance)
+			}
+			t.Errorf("want %q\n got %q", tc.want, got)
+		})
+	}
+}
+
+func TestEveryOperatorProducesGuidance(t *testing.T) {
+	// A survivor with no instruction is the thing this is meant to remove.
+	ms, _ := gen(t, `package p
+
+func f(a, b int, s []int, err error) (int, error) {
+	if a > b && a < 10 {
+		a++
+	}
+	a += b
+	for range s {
+		break
+	}
+	if err != nil {
+		return 0, err
+	}
+	work()
+	return a + b, nil
+}
+
+func work() {}
+`)
+	if len(ms) == 0 {
+		t.Fatal("no mutants generated")
+	}
+	seen := map[string]bool{}
+	for _, m := range ms {
+		if m.Guidance == "" {
+			t.Errorf("%s at line %d has no guidance", m.Operator, m.Line)
+		}
+		seen[m.Operator] = true
+	}
+	if len(seen) < 5 {
+		t.Errorf("fixture only exercised %d operators: %v", len(seen), seen)
+	}
+}
+
+func TestGuidanceNeverClaimsWhatTheTestsDo(t *testing.T) {
+	// A survivor cannot distinguish "the input is never supplied" from "the
+	// input is supplied and the result is never checked". Guidance that asserts
+	// the first would be wrong half the time, so none of it does.
+	ms, _ := gen(t, `package p
+
+func f(a, b int, s []int, err error) (int, error) {
+	if a > b && a < 10 {
+		a++
+	}
+	a += b
+	for range s {
+		break
+	}
+	if err != nil {
+		return 0, err
+	}
+	work()
+	return a + b, nil
+}
+
+func work() {}
+`)
+	for _, m := range ms {
+		for _, claim := range []string{"no test", "nothing tests", "never tested", "untested"} {
+			if strings.Contains(m.Guidance, claim) {
+				t.Errorf("%s guidance claims what the tests do: %q", m.Operator, m.Guidance)
+			}
+		}
+	}
+}

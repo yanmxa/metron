@@ -81,6 +81,25 @@ metron --since main --axes all      # 加上 mutation:会跑你的测试套件
       + if total <= 0 {
 ```
 
+
+每个存活的变异体都带着它证明缺失的那条断言,由算子和它的操作数推导出来:
+
+```
+  mutation
+    pricing/pricing.go:9  no test caught this change to Quote (CONDITIONALS_BOUNDARY)
+      - if total < 0 {
+      + if total <= 0 {
+      assert the behaviour at the boundary total == 0
+```
+
+最后那行才是重点。`--format json` 里它是 `detail` 字段,所以一个拿 metron 做反馈循环的
+agent 拿到的是一件具体、可验证的事,而不是一个还需要它自己解读的数字。这是**推导**出来的
+不是生成出来的——没有任何模型参与,同一个 commit 永远给出同一条指令。
+
+它的措辞永远是「该补哪条断言」,而不是「测试当前做了什么」。变异体存活分辨不出「这个输入
+从没被传进来」和「传进来了但结果没人检查」;在后一种情况下说成前一种,会让人去写一个已经
+存在的测试。
+
 **没被覆盖的代码要算进分母。** agent 写的代码里最典型的失败形态,是写了 200 行、把其中
 20 行测得很好。把未覆盖的变异体排除在分母之外,这种改动会拿到接近满分,而且可以直接刷分
 ——给一个小函数写一个漂亮测试就够了。*strength* 问的是「你写的那些测试够不够狠」,*score*
