@@ -58,6 +58,36 @@ agent 照着这些指令改完,再跑一次:
 
 退出码 0。**前后行覆盖率都是 100%**,只有 metron 能把这两者分开。
 
+## 安装
+
+```bash
+# 直接装二进制,不需要 Go 环境
+curl -fsSL https://raw.githubusercontent.com/yanmxa/metron/main/install.sh | sh
+
+# 或者,如果你有 Go
+go install github.com/yanmxa/metron/cmd/metron@latest
+```
+
+需要一个 git 仓库;只有从源码构建才需要 Go 1.26+。graph 这条轴还需要一份
+[CodeGraph](https://github.com/colbymchenry/codegraph) 索引,跑 `codegraph init`
+就有了;没有的话这条轴报 `n/a` 并说明原因,而不是默默地算通过。
+
+## 使用
+
+```bash
+cd your-repo
+metron init                         # 可选:按这个仓库现状校准参考区间
+metron --since main                 # complexity + graph,大约一秒
+metron --since main --axes all      # 加上 mutation:会跑你的测试套件
+metron --all                        # 量整个仓库,而不是一次改动
+```
+
+`metron init` 会先量一遍,再写出一份 `metron.json`,把复杂度上限设成**这个仓库今天最差的
+那个函数**,增量设成 0。已有的复杂度被容忍,但一点都不许再涨。一个第一次跑就报红、又找不到
+哪次改动该负责的工具,会在说出任何有用的话之前就被关掉。
+
+退出码:`0` 全部在区间内 · `1` 出错 · `2` 有读数超出区间 · `3` 预算用尽,读数只覆盖了一部分。
+
 ## 接进 agent
 
 ```
@@ -116,15 +146,8 @@ curl -fsSL https://raw.githubusercontent.com/yanmxa/metron/main/install.sh | sh 
 
 ## 分析现有代码
 
-```
-metron --all --axes complexity,graph
-```
-
-`--all` 不看 diff,直接量整个仓库。它能回答的更少——没有 base 版本,就没有「变糟了多少」,
-也判断不出哪条依赖是新画的,那些读数会报 `n/a` 而不是猜一个。
-
-仓库里还带了一个 `code-health` skill,它会跑这套分析、按 CRAP 排序,并写出一份带优先级的
-报告。见 [.claude/skills/code-health](.claude/skills/code-health/SKILL.md)。
+`--all` 能回答的比 `--since` 严格地少。没有 base 版本,就没有「变糟了多少」,也判断不出
+哪条依赖是新画的,那些读数会报 `n/a` 而不是猜一个。**绝不要把这种缺席当成通过。**
 
 ## 各项读数
 

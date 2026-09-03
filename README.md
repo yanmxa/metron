@@ -64,6 +64,39 @@ The agent acts on those instructions and runs metron again:
 
 Exit 0. Coverage was 100% before and after; only metron could tell the two apart.
 
+## Install
+
+```bash
+# a binary — no Go toolchain needed
+curl -fsSL https://raw.githubusercontent.com/yanmxa/metron/main/install.sh | sh
+
+# or, if you have Go
+go install github.com/yanmxa/metron/cmd/metron@latest
+```
+
+Needs a git repository, and Go 1.26+ only if you build from source. The graph
+axis also needs a [CodeGraph](https://github.com/colbymchenry/codegraph) index —
+`codegraph init` enables it. Without one that axis reports `n/a` and says why,
+rather than quietly passing.
+
+## Run
+
+```bash
+cd your-repo
+metron init                         # optional: calibrate the ranges to this repo
+metron --since main                 # complexity + graph, about a second
+metron --since main --axes all      # adds mutation: runs your test suite
+metron --all                        # measure the whole repository, not a change
+```
+
+`metron init` measures first, then writes a `metron.json` whose complexity limit
+is **today's worst function** with a delta of zero. Existing complexity is
+tolerated; none of it may grow. A tool that fails on the first run with no change
+to blame gets switched off before it has said anything useful.
+
+Exit codes: `0` all within range · `1` error · `2` a reading out of range ·
+`3` budget spent, readings cover only a sample.
+
 ## Wiring it into an agent
 
 ```
@@ -128,18 +161,10 @@ together — and that every finding carries the change that closes it.
 
 ## Analysing existing code
 
-```
-metron --all --axes complexity,graph
-```
-
-`--all` measures the whole repository instead of a diff. It answers strictly
-less — with no base revision there is no "how much worse did this get", and no
-way to tell which dependency is newly drawn, so those readings report `n/a`
-rather than guessing.
-
-The repository also ships a `code-health` skill that runs this analysis, ranks
-findings by CRAP, and writes a prioritised report:
-[.claude/skills/code-health](.claude/skills/code-health/SKILL.md).
+`--all` answers strictly less than `--since`. With no base revision there is no
+"how much worse did this get", and no way to tell which dependency is newly
+drawn, so those readings report `n/a` rather than guessing. Never present that
+absence as a pass.
 
 ## The readings
 

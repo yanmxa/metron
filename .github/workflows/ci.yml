@@ -36,6 +36,11 @@ jobs:
       - name: installer is valid POSIX sh
         run: sh -n install.sh
 
+      # A dead link is the first thing a new reader hits, and the README had
+      # one after a directory rename.
+      - name: markdown links resolve
+        run: ./.github/workflows/links.sh
+
   lint:
     runs-on: ubuntu-latest
     steps:
