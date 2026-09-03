@@ -2,24 +2,26 @@
 
 [English](README.md) · 简体中文
 
-给一次代码改动出一张化验单:七项读数,每项对照参考区间,附带一个可以拿去做闸门的退出码。
+**用明确的指标衡量 AI 刚写出来的代码,并把每一处缺口变成一条它能照着做的指令。**
 
-**不用 LLM,不联网,不需要 API key。** 每个数字都来自解析你的代码和跑你的测试。同一个
-commit 进去,同一组数字出来。
+agent 写出来的代码能过评审,但撑不住。它写的测试跑遍每一行、什么都不断言;它往已有函数里
+塞分支而不是抽出来;它找不到现成的工具函数就自己再写一个。这些在 diff 里看不出来,在覆盖率
+里也看不出来。
 
-## 问题长什么样
+metron 把它们量出来,然后说该怎么办——用 agent 能照着做、也能自己复验的话。
+
+**不用 LLM,不联网,不需要 API key。** 每个数字都来自解析代码和跑它的测试。同一个 commit
+进去,同一组数字出来——这正是它敢放进循环、也敢拿去做闸门的原因。
+
+## 这个循环
+
+agent 刚写完 `Discount` 和它的测试。测试的**行覆盖率是 100%**。
 
 ```
 $ metron --since main --axes all
 
-  METRON  main · 1 files · 18+
-
   reading            value   reference
   ─────────────────────────────────────
-  cognitive max         3   ≤ 15      ✓    Discount
-  cognitive Δ           0   = 0       ✓
-  redundant code        0   = 0       ✓
-  inconsistent code     0   = 0       ✓
   mutation score      20%   ≥ 70%     L
     test strength     20%   ≥ 80%     L    12 of 15 mutants survived
     reach            100%   ≥ 85%     ✓    every mutant was executed
@@ -27,39 +29,68 @@ $ metron --since main --axes all
   2 out of range
 
   mutation
-    pricing/pricing.go:9  no test caught this change to Discount (CONDITION_FORCE)
-      - if total < 0 {
-      + if true {
     pricing/pricing.go:9  no test caught this change to Discount (CONDITIONALS_BOUNDARY)
       - if total < 0 {
       + if total <= 0 {
-    …
+      assert the behaviour at the boundary total == 0
 ```
 
-**这份代码的行覆盖率是 100%。** 变异得分 20。把测试换成一份真的会断言的,同样是 100%
-覆盖率,得分变成 100。
+reach 是 100%:测试确实跑到了每一行。strength 是 20%:跑到了却几乎什么都没检查。而最后
+那一行不是抱怨,是**一件事**——每个存活的变异体都带着它证明缺失的那条断言,由算子和它的
+操作数推导出来。
 
-两条缩进的读数说出了**是哪一种**问题:reach 是 100%,说明测试确实执行到了这些代码;
-strength 只有 20%,说明它们执行了却什么都没检查。
-
-## 安装和使用
+agent 照着这些指令改完,再跑一次:
 
 ```
-go install github.com/yanmxa/metron/cmd/metron@latest
+  mutation score     100%   ≥ 70%     ✓
+    test strength    100%   ≥ 80%     ✓    0 of 15 mutants survived
+    reach            100%   ≥ 85%     ✓    every mutant was executed
 
-cd your-repo
-metron --since main                 # complexity + graph,大约一秒
-metron --since main --axes all      # 加上 mutation:会跑你的测试套件
+  all within range
 ```
 
-需要 Go 1.26+ 和一个 git 仓库。graph 这条轴还需要一份
-[CodeGraph](https://github.com/colbymchenry/codegraph) 索引,跑 `codegraph init` 就有了;
-没有的话这条轴报 `n/a` 并说明原因,而不是默默地算通过。
+退出码 0。**前后行覆盖率都是 100%**,只有 metron 能把这两者分开。
 
-退出码:`0` 全部在区间内 · `1` 出错 · `2` 有读数超出区间 ·
-`3` 预算用尽,读数只覆盖了一部分。
+## 接进 agent
+
+```
+metron --since main --axes all --format json
+```
+
+三件事让它能放进循环里:
+
+- **每条发现的 `detail` 是一条指令**,不是一个诊断——「assert the behaviour at the
+  boundary `total == 0`」,而不是「覆盖率偏低」。
+- **退出码就是停止条件。** `0` 完成 · `2` 还有读数超区间 · `3` 结果不完整,不能当通过 ·
+  `1` 出错。
+- **重跑很便宜。** 判定按内容哈希缓存,改一个函数不会重测其余:冷跑 8.3 秒,全命中 0.26 秒。
+
+给 agent 一条规则,它就能自己闭环:
+
+```markdown
+改完 Go 代码后跑 `metron --since main --axes all --format json`。
+对每一条发现,照它的 `detail` 去做,然后再跑一次。
+退出码为 0 才算完。绝不允许改 metron 的阈值来让它通过。
+```
+
+最后那句很重要。**闸门只有在 agent 挪不动它的时候才有意义。**
+
+## 分析现有代码
+
+```
+metron --all --axes complexity,graph
+```
+
+`--all` 不看 diff,直接量整个仓库。它能回答的更少——没有 base 版本,就没有「变糟了多少」,
+也判断不出哪条依赖是新画的,那些读数会报 `n/a` 而不是猜一个。
+
+仓库里还带了一个 `code-health` skill,它会跑这套分析、按 CRAP 排序,并写出一份带优先级的
+报告。见 [.claude/skills/code-health](.claude/skills/code-health/SKILL.md)。
 
 ## 各项读数
+
+每个指标的完整定义、作用、含义,以及可复现的样例:
+**[docs/metrics.md](docs/metrics.md)**(英文)。
 
 表格里有七项读数,其中五项参与闸门。每一项下面都跟着支撑它的具体发现。
 

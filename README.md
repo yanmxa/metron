@@ -84,7 +84,25 @@ Stop when the exit code is 0. Never edit metron's thresholds to make it pass.
 That last sentence matters. The gate is only worth having if the agent cannot
 move it.
 
+## Analysing existing code
+
+```
+metron --all --axes complexity,graph
+```
+
+`--all` measures the whole repository instead of a diff. It answers strictly
+less — with no base revision there is no "how much worse did this get", and no
+way to tell which dependency is newly drawn, so those readings report `n/a`
+rather than guessing.
+
+The repository also ships a `code-health` skill that runs this analysis, ranks
+findings by CRAP, and writes a prioritised report:
+[.claude/skills/code-health](.claude/skills/code-health/SKILL.md).
+
 ## The readings
+
+Full definitions, worked examples, and what each one is for:
+**[docs/metrics.md](docs/metrics.md)**.
 
 Seven readings sit in the table; five of them gate. Each is followed by the
 specific findings behind it.
