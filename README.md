@@ -1,5 +1,7 @@
 # metron
 
+English · [简体中文](README.zh.md)
+
 A lab report for a code change: seven readings, each against a reference range,
 with an exit code you can gate on.
 
@@ -10,6 +12,7 @@ running your tests. Same commit in, same numbers out.
 
 ```
 $ metron --since main --axes all
+
   METRON  main · 1 files · 18+
 
   reading            value   reference
