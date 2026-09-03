@@ -70,12 +70,17 @@ func (p *Panel) rows() []row {
 	var rows []row
 	for _, res := range p.Results {
 		for _, m := range res.Measures {
+			label := m.Label
+			if m.Sub {
+				// A breakdown of the reading above it, not a peer.
+				label = "  " + label
+			}
 			if m.Status == axis.StatusUnmeasured {
-				rows = append(rows, row{label: m.Label, value: "—", flag: unmeasuredFlag, note: m.Note})
+				rows = append(rows, row{label: label, value: "—", flag: unmeasuredFlag, note: m.Note})
 				continue
 			}
 			rows = append(rows, row{
-				label: m.Label,
+				label: label,
 				value: m.Unit.Format(m.Value),
 				ref:   axis.FormatRange(m.RefLow, m.RefHigh, m.Unit),
 				flag:  m.Flag(),

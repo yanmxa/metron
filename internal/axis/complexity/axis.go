@@ -202,7 +202,6 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 
 	hiCog := float64(a.cfg.MaxCognitive)
 	hiDelta := float64(a.cfg.MaxDelta)
-	zero := 0.0
 
 	r.Measures = []axis.Measure{
 		{
@@ -217,22 +216,17 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 		{
 			// The reading this axis exists for: agents pile branches into an
 			// existing function instead of extracting a new one.
-			Key: "complexity.delta_max", Label: "cognitive \u0394 (existing funcs)",
+			Key: "complexity.delta_max", Label: "cognitive \u0394",
 			Value: float64(maxDelta), Unit: axis.UnitDelta,
 			RefHigh: &hiDelta, Headline: true,
 			Status: statusFor(float64(maxDelta) <= hiDelta),
 			Note:   deltaAt,
 		},
-		{
-			Key: "complexity.over_threshold", Label: "funcs over threshold",
-			Value: float64(over), Unit: axis.UnitCount,
-			RefHigh: &zero, Status: statusFor(over == 0),
-		},
-		{
-			Key: "complexity.cognitive_raw_max", Label: "cognitive max (raw)",
-			Value: float64(maxRaw), Unit: axis.UnitCount,
-			Status: axis.StatusOK,
-		},
+	}
+	r.Diagnostics = map[string]float64{
+		"complexity.over_threshold":    float64(over),
+		"complexity.cognitive_raw_max": float64(maxRaw),
+		"complexity.functions":         float64(len(scores)),
 	}
 
 	r.Observations = a.observations(scores)

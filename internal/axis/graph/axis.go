@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/yanmxa/metron/internal/axis"
 	"github.com/yanmxa/metron/internal/target"
@@ -91,19 +92,39 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 	crossings := LayerCrossings(g, changed, newCallees)
 	divergence := SiblingDivergence(g, changed, a.cfg.MinSiblings, a.cfg.MinShare)
 
+	// Two readings, not five. Orphans and duplicates both mean the code did not
+	// need to exist as written; the three consistency rules all mean it does not
+	// fit what is already there. You act on each group the same way — read the
+	// finding underneath — so five rows only made the table harder to scan.
 	zero := 0.0
-	count := func(key, label string, n int, headline bool) axis.Measure {
-		return axis.Measure{
+	count := func(key, label string, n int, note string) axis.Measure {
+		m := axis.Measure{
 			Key: key, Label: label, Value: float64(n), Unit: axis.UnitCount,
-			RefHigh: &zero, Headline: headline, Status: statusFor(n == 0),
+			RefHigh: &zero, Headline: true, Status: statusFor(n == 0),
 		}
+		if n > 0 {
+			m.Note = note
+		}
+		return m
 	}
+	redundant := len(orphans) + len(dups)
+	inconsistent := len(bypassed) + len(crossings) + len(divergence)
+
 	r.Measures = []axis.Measure{
-		count("graph.orphans", "orphaned symbols", len(orphans), true),
-		count("graph.duplicates", "duplicated work", len(dups), true),
-		count("graph.bypassed", "bypassed paths", len(bypassed), true),
-		count("graph.layer_crossings", "unprecedented deps", len(crossings), false),
-		count("graph.sibling_divergence", "sibling divergence", len(divergence), false),
+		count("graph.redundant", "redundant code", redundant,
+			breakdown("unreachable", len(orphans), "duplicated", len(dups))),
+		count("graph.inconsistent", "inconsistent code", inconsistent,
+			breakdown("bypassed a wrapper", len(bypassed),
+				"new dependency direction", len(crossings),
+				"broke a local convention", len(divergence))),
+	}
+	r.Diagnostics = map[string]float64{
+		"graph.orphans":            float64(len(orphans)),
+		"graph.duplicates":         float64(len(dups)),
+		"graph.bypassed":           float64(len(bypassed)),
+		"graph.layer_crossings":    float64(len(crossings)),
+		"graph.sibling_divergence": float64(len(divergence)),
+		"graph.changed_symbols":    float64(len(changed)),
 	}
 
 	all := append(append(append(append(orphans, dups...), bypassed...), crossings...), divergence...)
@@ -190,11 +211,24 @@ func (a *Axis) observations(fs []Finding) []axis.Observation {
 	return out
 }
 
+// breakdown renders the non-zero parts of a merged reading, so the single
+// number still says what it is made of.
+func breakdown(pairs ...any) string {
+	var parts []string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		label, _ := pairs[i].(string)
+		n, _ := pairs[i+1].(int)
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 func unmeasured(why string) []axis.Measure {
 	keys := []struct{ key, label string }{
-		{"graph.orphans", "orphaned symbols"},
-		{"graph.duplicates", "duplicated work"},
-		{"graph.bypassed", "bypassed paths"},
+		{"graph.redundant", "redundant code"},
+		{"graph.inconsistent", "inconsistent code"},
 	}
 	var out []axis.Measure
 	for _, k := range keys {

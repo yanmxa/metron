@@ -78,8 +78,12 @@ type Measure struct {
 	RefHigh  *float64 `json:"refHigh,omitempty"`
 	Status   Status   `json:"status"`
 	Headline bool     `json:"headline"` // headline readings gate; the rest are diagnostics
-	Note     string   `json:"note,omitempty"`
-	Flagged  string   `json:"flag"` // H / L / ✓, filled at marshal time
+	// Sub marks a reading that decomposes the one above it rather than standing
+	// on its own. The panel indents it, because presenting a breakdown as a
+	// peer is what turns a short report into a wall of numbers.
+	Sub     bool   `json:"sub,omitempty"`
+	Note    string `json:"note,omitempty"`
+	Flagged string `json:"flag"` // H / L / ✓, filled at marshal time
 }
 
 // InRange reports whether the reading sits inside its reference range. A
@@ -114,8 +118,12 @@ type Result struct {
 	Measures     []Measure     `json:"measures"`
 	Observations []Observation `json:"observations,omitempty"`
 	Notes        []string      `json:"notes,omitempty"` // e.g. "quarantined 1 flaky test"
-	Partial      bool          `json:"partial"`         // budget ran out; readings describe a sample
-	Duration     time.Duration `json:"durationMs"`
+	// Diagnostics are numbers worth keeping but not worth a row: raw variants,
+	// counts already implied by a ratio, and metron's own health. They reach
+	// --format json and nothing else.
+	Diagnostics map[string]float64 `json:"diagnostics,omitempty"`
+	Partial     bool               `json:"partial"` // budget ran out; readings describe a sample
+	Duration    time.Duration      `json:"durationMs"`
 }
 
 // Headlines returns the measures that gate.

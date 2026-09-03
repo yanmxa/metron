@@ -1,6 +1,10 @@
 package mutation
 
-import "github.com/yanmxa/metron/internal/axis"
+import (
+	"fmt"
+
+	"github.com/yanmxa/metron/internal/axis"
+)
 
 // Tally counts outcomes.
 type Tally struct {
@@ -114,28 +118,43 @@ func (t Tally) Measures(cfg Config) []axis.Measure {
 	strength, stok := t.Strength()
 	reach, rok := t.Reach()
 
-	out := []axis.Measure{
-		measure("mutation.score", "mutation score", score, sok, lo(cfg.RefScore), true),
-		measure("mutation.strength", "test strength", strength, stok, lo(cfg.RefStrength), false),
-		measure("mutation.reach", "reach", reach, rok, lo(cfg.RefReach), false),
+	strengthM := measure("mutation.strength", "test strength", strength, stok, lo(cfg.RefStrength), false)
+	reachM := measure("mutation.reach", "reach", reach, rok, lo(cfg.RefReach), false)
+	strengthM.Sub, reachM.Sub = true, true
+
+	// The counts live on the readings they explain. As their own rows they said
+	// the same thing a second time, and every surviving mutant is listed below
+	// the table anyway.
+	if stok {
+		strengthM.Note = fmt.Sprintf("%d of %d mutants survived", t.Survived, t.Detected()+t.Survived)
 	}
-	zero := 0.0
-	out = append(out, axis.Measure{
-		Key: "mutation.survived", Label: "surviving mutants",
-		Value: float64(t.Survived), Unit: axis.UnitCount, RefHigh: &zero,
-		Status: statusFor(t.Survived == 0),
-	})
-	out = append(out, axis.Measure{
-		Key: "mutation.not_covered", Label: "uncovered mutants",
-		Value: float64(t.NotCovered), Unit: axis.UnitCount, RefHigh: &zero,
-		Status: statusFor(t.NotCovered == 0),
-	})
-	out = append(out, axis.Measure{
-		Key: "mutation.not_viable_rate", Label: "non-viable rate",
-		Value: t.NotViableRate(), Unit: axis.UnitRatio, RefHigh: &hiRate,
-		Status: statusFor(t.NotViableRate() <= hiRate),
-	})
-	return out
+	if rok {
+		if t.NotCovered == 0 {
+			reachM.Note = "every mutant was executed"
+		} else {
+			reachM.Note = fmt.Sprintf("%d never executed", t.NotCovered)
+		}
+	}
+	_ = hiRate
+
+	return []axis.Measure{
+		measure("mutation.score", "mutation score", score, sok, lo(cfg.RefScore), true),
+		strengthM,
+		reachM,
+	}
+}
+
+// Diagnostics are numbers worth recording but not worth a row.
+func (t Tally) Diagnostics() map[string]float64 {
+	return map[string]float64{
+		"mutation.killed":          float64(t.Killed),
+		"mutation.survived":        float64(t.Survived),
+		"mutation.timed_out":       float64(t.TimedOut),
+		"mutation.not_covered":     float64(t.NotCovered),
+		"mutation.not_viable":      float64(t.NotViable),
+		"mutation.skipped":         float64(t.Skipped),
+		"mutation.not_viable_rate": t.NotViableRate(),
+	}
 }
 
 func statusFor(ok bool) axis.Status {
