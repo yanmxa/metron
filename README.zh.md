@@ -7,56 +7,207 @@
 [![go report card](https://goreportcard.com/badge/github.com/yanmxa/metron)](https://goreportcard.com/report/github.com/yanmxa/metron)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**用明确的指标衡量 AI 刚写出来的代码,并把每一处缺口变成一条它能照着做的指令。**
+现在我们的代码有很大一部分是 AI 写的。为了让它规矩一点,我们用测试驱动开发:先说清楚
+代码该做什么,再让它做到。
 
-agent 写出来的代码能过评审,但撑不住。它写的测试跑遍每一行、什么都不断言;它往已有函数里
-塞分支而不是抽出来;它找不到现成的工具函数就自己再写一个。这些在 diff 里看不出来,在覆盖率
-里也看不出来。
+但 TDD 有一个它自己检查不了的前提——**你拿到的那些测试,到底值不值得拥有**。有三件事会
+出问题,而且在 diff 里一件都看不出来。
 
-metron 把它们量出来,然后说该怎么办——用 agent 能照着做、也能自己复验的话。
+---
 
-**不用 LLM,不联网,不需要 API key。** 每个数字都来自解析代码和跑它的测试。同一个 commit
-进去,同一组数字出来——这正是它敢放进循环、也敢拿去做闸门的原因。
+## 一、这些测试到底有没有用?
 
-## 这个循环
+你让 agent 写测试,它就会写出测试。测试能跑、能过,覆盖率报告一片绿。但那份报告回答的是
+「这一行有没有被执行」,而不是你真正想问的那个问题。
 
-agent 刚写完 `Discount` 和它的测试。测试的**行覆盖率是 100%**。
+下面是 agent 写的一个函数,和它给这个函数写的测试:
 
-(下面是截取过的:只保留变动的读数,以及十二条发现中的一条。)
+```go
+func Discount(total int, tier string) (int, error) {
+	if total < 0 {
+		return 0, ErrNegative
+	}
+	if tier == "gold" {
+		return total * 80 / 100, nil
+	}
+	if total > 100 {
+		return total - 10, nil
+	}
+	return total, nil
+}
+```
+
+```go
+func TestDiscount(t *testing.T) {
+	for _, tc := range []struct{ total int; tier string }{
+		{200, "gold"}, {200, "std"}, {50, "std"}, {-1, "std"},
+	} {
+		got, err := Discount(tc.total, tc.tier)
+		if tc.total < 0 { if err == nil { t.Fatal("want error") }; continue }
+		if got < 0 { t.Fatalf("negative result %d", got) }
+	}
+}
+```
+
+**行覆盖率:100%。** 每条分支都跑到了。而这个测试几乎什么都没断言——把
+`total * 80 / 100` 改成 `total * 90 / 100`,它照样全绿。
+
+### 变异测试回答覆盖率答不了的那个问题
+
+**故意把代码改坏,看测试察不察觉。** metron 会把改动过的代码做一些小而刻意的改写——
+翻转一个比较、丢掉一个返回的错误、把分支强行定死——然后拿测试套件去跑每一个改写。
+一个没人察觉的改写,就是一个缺口。
 
 ```
-$ metron --since main --axes all
-
-  reading            value   reference
-  ─────────────────────────────────────
   mutation score      20%   ≥ 70%     L
     test strength     20%   ≥ 80%     L    12 of 15 mutants survived
     reach            100%   ≥ 85%     ✓    every mutant was executed
-
-  2 out of range
-
-  mutation
-    pricing/pricing.go:9  no test caught this change to Discount (CONDITIONALS_BOUNDARY)
-      - if total < 0 {
-      + if total <= 0 {
-      assert the behaviour at the boundary total == 0
 ```
 
-reach 是 100%:测试确实跑到了每一行。strength 是 20%:跑到了却几乎什么都没检查。而最后
-那一行不是抱怨,是**一件事**——每个存活的变异体都带着它证明缺失的那条断言,由算子和它的
-操作数推导出来。
+两条缩进的读数说出了**是哪一种**问题。**reach 是 100%**:测试确实跑到了每一行。
+**strength 只有 20%**:跑到了却什么都不检查。这是两种不同的病、两种不同的修法,
+而单一个数字会把你到底得的是哪一种藏起来。
 
-agent 照着这些指令改完,再跑一次:
+把测试改成断言确切的值,得分变成 **100**——**行覆盖率还是同样的 100%**。
+覆盖率分不出这两份测试,这个能。
+
+### 而且它会告诉你该写什么
+
+一个存活的变异体不是一句抱怨,而是**那条缺失的测试的规格说明**,而且具体是哪一条,可以
+从算子机械地推导出来:
 
 ```
-  mutation score     100%   ≥ 70%     ✓
-    test strength    100%   ≥ 80%     ✓    0 of 15 mutants survived
-    reach            100%   ≥ 85%     ✓    every mutant was executed
-
-  all within range
+  pricing.go:9  no test caught this change to Discount (CONDITIONALS_BOUNDARY)
+    - if total < 0 {
+    + if total <= 0 {
+    assert the behaviour at the boundary total == 0
 ```
 
-退出码 0。**前后行覆盖率都是 100%**,只有 metron 能把这两者分开。
+最后那一行是**推导**出来的,不是生成的——没有模型参与,同一个 commit 进去,同一条指令
+出来。这正是它能被 agent 直接使用、而不只是给人看的原因。
+
+---
+
+## 二、半年后还有人改得动它吗?
+
+把代码写出来是最短的那一段。它之后会被读、被扩展、被调试很久很久,而一个只想着「让测试
+过」的 agent,对这些一点利害关系都没有。
+
+### 用认知复杂度,不用圈复杂度
+
+常用的那个指标数的是判定点。它分不出「三个并排的判定」和「三个套在一起的判定」——
+而这两者读起来的难度完全不是一回事:
+
+```go
+func Flat(a, b, c bool) int {          func Nested(a, b, c bool) int {
+	n := 0                                     n := 0
+	if a { n++ }                               if a {
+	if b { n++ }                                       if b {
+	if c { n++ }                                               if c { n++ }
+	return n                                           }
+}                                              }
+                                               return n
+                                       }
+```
+
+```
+  Flat     cognitive=3   cyclomatic=4
+  Nested   cognitive=6   cyclomatic=4
+```
+
+**圈复杂度完全一样。** 认知复杂度翻倍,因为它对**每一层嵌套**都要额外记账——而嵌套正是
+让代码难以在脑子里装下的那个东西。
+
+### 增量比绝对值更要紧
+
+agent 很少一次写出一个巨兽函数。它往一个已有函数里加一个分支,再加一个,每一次单看都还
+算合理。下面是对 `spf13/cobra` 的一次真实改动:
+
+```
+  cognitive max         12   ≤ 15      ✓    RangeArgs
+  cognitive Δ           +9   = 0       H    RangeArgs
+```
+
+**绝对值是过关的。** 12 离上限 15 还很宽裕。只有增量抓住了它——这个函数在一次改动里从
+3 涨到了 12。把 `Δ = 0` 设成闸门,代码库就没法悄悄腐化。
+
+### CRAP:验证不了的复杂度才是危险的复杂度
+
+复杂度本身不等于风险。一个很绕但每条分支都被测试钉死的函数没问题;一个中等复杂、却没人
+检查的函数,才是改动会悄无声息弄坏东西的地方。
+[CRAP](https://www.artima.com/weblogs/viewpost.jsp?thread=210575) 把两者合起来:
+
+```
+CRAP(f) = cyclomatic(f)² × (1 − tested(f))³ + cyclomatic(f)
+```
+
+Crap4j 原版的 `tested` 用的是**行覆盖率**。metron 换成了这个函数自己的**变异得分**——
+因为我们刚刚才确认过,覆盖率正是那个不能信的数。
+
+```
+  cognitive max       6   ≤ 15      ✓          ← 复杂度说这个函数没问题
+
+  complexity
+    risky.go:4  Route is the riskiest thing in this change
+      CRAP 42 (0% of mutants caught) — over the usual limit of 30 · cyclomatic 6
+```
+
+任何**单独一项**读数都不会点名 `Route`。复杂度过关;变异得分只是一个关于整个包的数字。
+只有两者合起来,才说得出那句:**先看这里。**
+
+---
+
+## 三、它和已经有的东西合得上吗?
+
+最让我意外的失败形态不是「写错了」,而是**写得完全正确、但根本不该存在**的代码——
+一个因为找不到现成的所以重写了一遍的工具函数、一个被绕过去的包装器、一条这个仓库里
+从来没人画过的依赖方向。
+
+**再多的测试也抓不到这类问题。代码是对的。** 变糟的是仓库的**形状**,而形状这个东西,
+站在一个 diff 内部是看不见的。
+
+### 用整个仓库的图
+
+metron 会读一份 [CodeGraph](https://github.com/colbymchenry/codegraph) 索引——仓库里
+所有符号和它们之间的所有边——然后拿这次改动跟它对照。
+
+**冗余代码** —— 本来不必存在的东西:
+
+```
+  redundant code        1   = 0       H    1 unreachable
+
+  graph
+    dead.go:8  orphan is never reached
+      no inbound edge in the graph, and the identifier appears nowhere else
+```
+
+**不一致代码** —— 和已有结构不合的东西:
+
+- 别人都经过包装器,它直接调目标
+- 画了一条这个仓库没有先例的依赖方向
+- 同目录每个邻居都遵守的惯例,它没遵守
+
+**只有这次改动新增的边才算。** 不做这个比对的话,一个只是被碰过的函数一直以来做过的每一次
+调用都会被报出来——在 `cobra` 上实测,六次 no-op 改动在修复前产生了五条发现,修复后是零。
+
+---
+
+## 合起来看
+
+三个问题、七项读数、一个退出码:
+
+| | 问什么 | 读数 |
+| --- | --- | --- |
+| **mutation** | 测试撑不撑得住? | `score`、`strength`、`reach` |
+| **complexity** | 以后还改得动吗? | `cognitive max`、`cognitive Δ` |
+| **graph** | 和已有的合得上吗? | `redundant`、`inconsistent` |
+
+外加 CRAP,它负责排序而不参与闸门。
+
+**没有加权总分。** 单个综合分会把「是哪一项烂了」藏起来,而且必然被刷。
+
+**不用 LLM,不联网,不需要 API key。** 每个数字都来自解析代码和跑它的测试。同一个 commit
+进去,同一组数字出来——这正是它敢放进循环、也敢拿去做闸门的原因。
 
 ## 安装
 
@@ -149,128 +300,26 @@ curl -fsSL https://raw.githubusercontent.com/yanmxa/metron/main/install.sh | sh 
 `--all` 能回答的比 `--since` 严格地少。没有 base 版本,就没有「变糟了多少」,也判断不出
 哪条依赖是新画的,那些读数会报 `n/a` 而不是猜一个。**绝不要把这种缺席当成通过。**
 
-## 各项读数
+## 所有读数一览
 
-每个指标的完整定义、作用、含义,以及可复现的样例:
-**[docs/metrics.zh.md](docs/metrics.zh.md)**。
+| 读数 | 超出区间意味着 |
+| --- | --- |
+| **mutation score** | 这次改动没有被测试撑住。这一项是闸门。 |
+| ↳ test strength | 测试跑到了这些代码,但断言得太少。 |
+| ↳ reach | 改动里有很大一部分没有任何测试执行到。 |
+| **cognitive max** | 有个改动过的函数很难读。输出里会点名。 |
+| **cognitive Δ** | 你把一个已有函数改得更糟了,而不是把逻辑抽出来。 |
+| **redundant code** | 有东西够不着,或者重复了已经存在的东西。 |
+| **inconsistent code** | 有东西绕过了包装器、画了没有先例的依赖、或破坏了本地惯例。 |
+| CRAP *(按函数)* | 用「测得有多差」给复杂度加权。惯例红线 30。只排序,不参与闸门。 |
 
-表格里有七项读数,其中五项参与闸门。每一项下面都跟着支撑它的具体发现。
+粗体的默认参与闸门,可以用 `--fail-on` 改。每条发现都会附上能把它关掉的那个改动。
 
-### mutation —— 测试有没有把代码撑住?
+**完整定义、精确公式,以及每个指标一个可复现的样例:
+[docs/metrics.zh.md](docs/metrics.zh.md)。**
 
-变异体只在改动碰到的函数体内生成,每个都是一处刻意的改写。只要有测试挂掉或挂死,
-这个变异体就算被**察觉**。
-
-| 读数 | 怎么算的 | 超出区间意味着 |
-| --- | --- | --- |
-| **mutation score** | `察觉 / (察觉 + 存活 + 未覆盖)` | 这次改动没有被测试撑住。这一项是闸门。 |
-| ↳ test strength | `察觉 / (察觉 + 存活)` | 测试跑到了这些代码,但断言得太少。 |
-| ↳ reach | `1 − 未覆盖 / 总数` | 改动里有很大一部分没有任何测试执行到。 |
-
-```
-  mutation
-    pricing/pricing.go:9  no test caught this change to Quote (CONDITIONALS_BOUNDARY)
-      - if total < 0 {
-      + if total <= 0 {
-```
-
-
-每个存活的变异体都带着它证明缺失的那条断言,由算子和它的操作数推导出来:
-
-```
-  mutation
-    pricing/pricing.go:9  no test caught this change to Quote (CONDITIONALS_BOUNDARY)
-      - if total < 0 {
-      + if total <= 0 {
-      assert the behaviour at the boundary total == 0
-```
-
-最后那行才是重点。`--format json` 里它是 `detail` 字段,所以一个拿 metron 做反馈循环的
-agent 拿到的是一件具体、可验证的事,而不是一个还需要它自己解读的数字。这是**推导**出来的
-不是生成出来的——没有任何模型参与,同一个 commit 永远给出同一条指令。
-
-它的措辞永远是「该补哪条断言」,而不是「测试当前做了什么」。变异体存活分辨不出「这个输入
-从没被传进来」和「传进来了但结果没人检查」;在后一种情况下说成前一种,会让人去写一个已经
-存在的测试。
-
-**没被覆盖的代码要算进分母。** agent 写的代码里最典型的失败形态,是写了 200 行、把其中
-20 行测得很好。把未覆盖的变异体排除在分母之外,这种改动会拿到接近满分,而且可以直接刷分
-——给一个小函数写一个漂亮测试就够了。*strength* 问的是「你写的那些测试够不够狠」,*score*
-问的是「这次改动有没有被测试撑住」。只有后者值得设闸门。编译不过的变异体完全不算——那是
-metron 自己的问题,不是你的,单独报。
-
-### complexity —— 有多难读、多难改?
-
-按 SonarSource 规范在 `go/ast` 上算认知复杂度:每个打断线性流程的结构记 1 分,再按它所处
-的嵌套层级每层加 1 分。
-
-**Go 的 err 卫语句要打折。** `if err != nil { return err }` 占 Go 标准库全部分支关键字的
-7.7%,应用代码里更高。Go 读者把它当成一个 token 而不是一次分支;全额计入会让每个 Go 函数
-都显得复杂,这个指标也就废了。只有**纯粹用来 bail out** 的才打折——带 `else` 的、或者真做
-了错误处理的,是真分支。未打折的那个数保留在 JSON 里,和 gocognit 可比。
-
-| 读数 | 怎么算的 | 超出区间意味着 |
-| --- | --- | --- |
-| **cognitive max** | 变更函数里打折后的最高分 | 有个改动过的函数很难读。输出里会点名。 |
-| **cognitive Δ** | 现在的分数减去 merge base 上的分数,按名字+receiver 配对 | 你把一个已有函数改得更糟了,而不是把逻辑抽出来。 |
-
-```
-  complexity
-    pricing/pricing.go:8  Quote (Δ +9, was 3)
-      CRAP 54 (10% of mutants caught) — over the usual limit of 30 · cognitive 7 · cyclomatic 8
-```
-
-圈复杂度(cyclomatic)、扇出、参数个数、行数、嵌套深度对每个变更函数也都算了。它们出现在
-每条发现里、也在 `--format json` 里,但不单独占一项读数。
-
-### graph —— 它和已有的东西合不合?
-
-从 CodeGraph 索引里读:仓库里的符号和它们之间的边。会跟 merge base 比对,**只有这次改动
-新增的边**才算。
-
-| 读数 | 怎么算的 | 超出区间意味着 |
-| --- | --- | --- |
-| **redundant code** | 无法到达的符号 + 近重复 | 有些代码本来不必以这种形式存在。 |
-| **inconsistent code** | 绕过包装器 + 无先例的依赖方向 + 破坏本地惯例 | 有些代码和这个仓库不合。 |
-
-```
-  graph
-    pricing/pricing.go:22  unusedHelper is never reached
-      no inbound edge in the graph, and the identifier appears nowhere else in the source
-```
-
-这两项是**刻意做粗的**。原来五个独立的计数器在用五种说法讲同一件事,而你对它们的处理方式
-完全一样:去看下面那条发现。单项的计数仍然在 `--format json` 里。
-
-**没有加权总分。** 单个综合分会把「是哪一项烂了」藏起来,而且必然被刷。
-
-## CRAP —— 先修哪一个?
-
-```
-CRAP(f) = cyclomatic(f)² × (1 − mutationScore(f))³ + cyclomatic(f)
-```
-
-[Change Risk Analysis and Predictions](https://www.artima.com/weblogs/viewpost.jsp?thread=210575),Alberto Savoia
-2007 年提出,由 Crap4j 实现。复杂度在被测住时可以被原谅,没测住时就重罚:
-圈复杂度 10 的函数,全测住是 10 分,完全没测是 110 分。惯例的红线是 30。
-
-metron 在一个地方和原版不同,而且是关键的那个地方。Crap4j 吃的是**行覆盖率**——正是这个
-工具存在的理由所要质疑的那个数。这里的「测住」一项换成了**该函数的变异得分**,所以一个
-覆盖率 100% 却什么都不断言的函数,仍然是危险的,而不会被算成安全。那正是 CRAP 当初要抓的
-情况,也正是基于覆盖率的版本会漏掉的。
-
-它**不是第八项读数**。它是按函数算的,作用是排序而不是设闸门,所以它给 complexity 的发现
-加注并排序——并且会把一个 complexity 轴放过去的函数提上来。上面那个例子里,圈复杂度 8 离
-阈值 15 还很远,但只有 10% 的变异体被抓住,它仍然是这次改动里最危险的东西,而其它任何一项
-读数都不会这么说。
-
-CRAP 需要两条轴都跑过。不加 `--axes all` 的话,面板会**明说**而不是什么都不打印:
-
-```
-  all within range · risk ranking needs the mutation axis — add --axes all
-```
-
-没有变异体的函数不给分,而不是编一个出来。
+不占表格行的数字——圈复杂度、扇出、参数个数、嵌套深度、各条图规则的单项计数、变异体原始
+计数——全都在 `--format json` 的 `diagnostics` 里。
 
 ## 值得知道的几个行为
 

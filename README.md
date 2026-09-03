@@ -7,62 +7,222 @@ English · [简体中文](README.zh.md)
 [![go report card](https://goreportcard.com/badge/github.com/yanmxa/metron)](https://goreportcard.com/report/github.com/yanmxa/metron)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Measures what an AI agent just wrote, against explicit metrics, and hands it
-back a concrete instruction for every gap it finds.**
+Most of our code is written by an AI now. Test-driven development is how we keep
+that honest: say what the code must do, then make it do it.
 
-Agents produce code that passes review and does not hold. They write tests that
-execute every line and assert nothing. They pile branches into a function instead
-of extracting one. They rewrite a helper that already exists because they could
-not find it. None of that shows up in a diff, and none of it shows up in coverage.
+Except TDD assumes something it cannot check — that the tests you got are worth
+having. Three things go wrong, and none of them show up in a diff.
 
-metron measures it, then says what to do about it — in terms an agent can act on
-and re-verify.
+---
+
+## 1. Are the tests actually any good?
+
+An agent asked for tests will produce tests. They will run, they will pass, and
+your coverage report will be green. That report answers "was this line
+executed", which is not the question you meant to ask.
+
+Here is a function and a test an agent wrote for it:
+
+```go
+func Discount(total int, tier string) (int, error) {
+	if total < 0 {
+		return 0, ErrNegative
+	}
+	if tier == "gold" {
+		return total * 80 / 100, nil
+	}
+	if total > 100 {
+		return total - 10, nil
+	}
+	return total, nil
+}
+```
+
+```go
+func TestDiscount(t *testing.T) {
+	for _, tc := range []struct{ total int; tier string }{
+		{200, "gold"}, {200, "std"}, {50, "std"}, {-1, "std"},
+	} {
+		got, err := Discount(tc.total, tc.tier)
+		if tc.total < 0 { if err == nil { t.Fatal("want error") }; continue }
+		if got < 0 { t.Fatalf("negative result %d", got) }
+	}
+}
+```
+
+**Coverage: 100% of statements.** Every branch runs. And the test asserts almost
+nothing — change `total * 80 / 100` to `total * 90 / 100` and it still passes.
+
+### Mutation testing answers the question coverage cannot
+
+Break the code on purpose, then see whether the tests notice. metron rewrites the
+changed code in small deliberate ways — flip a comparison, drop a returned error,
+force a branch — and runs the suite against each rewrite. A rewrite nothing
+notices is a gap.
+
+```
+  mutation score      20%   ≥ 70%     L
+    test strength     20%   ≥ 80%     L    12 of 15 mutants survived
+    reach            100%   ≥ 85%     ✓    every mutant was executed
+```
+
+The two indented readings say *which* problem it is. **Reach** is 100%: the tests
+really do run every line. **Strength** is 20%: they run it and check nothing.
+Those are different failures with different fixes, and a single number hides
+which one you have.
+
+Rewrite the test to assert exact values and it scores **100** — at the same 100%
+coverage. Coverage cannot tell those two suites apart. This can.
+
+### And it tells you what to write
+
+A surviving mutant is not a complaint. It is a specification for the missing
+test, and which one follows mechanically from the operator:
+
+```
+  pricing.go:9  no test caught this change to Discount (CONDITIONALS_BOUNDARY)
+    - if total < 0 {
+    + if total <= 0 {
+    assert the behaviour at the boundary total == 0
+```
+
+That last line is derived, not generated — no model involved, same commit in,
+same instruction out. It is what makes this usable by an agent rather than only
+by a person.
+
+---
+
+## 2. Will anyone be able to change it in six months?
+
+Getting code written is the short part. It gets read, extended and debugged for
+far longer, and an agent optimising for "make the test pass" has no stake in any
+of that.
+
+### Cognitive complexity, not cyclomatic
+
+The usual measure counts decision points. It cannot tell three decisions in a row
+from three decisions inside one another — and those are not equally hard to read:
+
+```go
+func Flat(a, b, c bool) int {          func Nested(a, b, c bool) int {
+	n := 0                                     n := 0
+	if a { n++ }                               if a {
+	if b { n++ }                                       if b {
+	if c { n++ }                                               if c { n++ }
+	return n                                           }
+}                                              }
+                                               return n
+                                       }
+```
+
+```
+  Flat     cognitive=3   cyclomatic=4
+  Nested   cognitive=6   cyclomatic=4
+```
+
+Identical cyclomatic count. Cognitive complexity doubles, because it charges a
+penalty for every level of nesting — which is what actually makes code hard to
+hold in your head.
+
+### The delta matters more than the absolute value
+
+Agents rarely write one monstrous function. They add a branch to an existing one,
+then another, and each individual change looks reasonable. Here is a real change
+to `spf13/cobra`:
+
+```
+  cognitive max         12   ≤ 15      ✓    RangeArgs
+  cognitive Δ           +9   = 0       H    RangeArgs
+```
+
+**The absolute value passes.** 12 is comfortably inside a limit of 15. Only the
+delta catches it — that function went from 3 to 12 in one change. Gate on `Δ = 0`
+and a codebase cannot silently rot.
+
+### CRAP: complexity you cannot verify is the dangerous kind
+
+Complexity alone is not risk. A gnarly function with a suite that pins every
+branch is fine; a middling one nothing checks is where a change quietly breaks
+something. [CRAP](https://www.artima.com/weblogs/viewpost.jsp?thread=210575)
+combines the two:
+
+```
+CRAP(f) = cyclomatic(f)² × (1 − tested(f))³ + cyclomatic(f)
+```
+
+Crap4j's original uses line coverage for `tested`. metron uses that function's
+**mutation score** instead — because we just established that coverage is the
+number you cannot trust.
+
+```
+  cognitive max       6   ≤ 15      ✓          ← complexity says this is fine
+
+  complexity
+    risky.go:4  Route is the riskiest thing in this change
+      CRAP 42 (0% of mutants caught) — over the usual limit of 30 · cyclomatic 6
+```
+
+Neither reading alone flags `Route`. Complexity clears its limit; the mutation
+score is just a number about the package. Only together do they say: *this is
+where to look first.*
+
+---
+
+## 3. Does it fit what is already there?
+
+The failure that surprised me most is not incorrect code. It is code that is
+perfectly correct and should not exist — a helper rewritten because the agent
+could not find the one that was already there, a wrapper stepped around, a
+dependency drawn in a direction nothing else in the repository draws.
+
+No amount of testing catches this. The code works. It is the *shape* of the
+repository that got worse, and you cannot see shape from inside one diff.
+
+### A graph of the whole repository
+
+metron reads a [CodeGraph](https://github.com/colbymchenry/codegraph) index —
+every symbol and every edge between them — and compares the change against it.
+
+**Redundant code** — something that did not need to exist:
+
+```
+  redundant code        1   = 0       H    1 unreachable
+
+  graph
+    dead.go:8  orphan is never reached
+      no inbound edge in the graph, and the identifier appears nowhere else
+```
+
+**Inconsistent code** — something that does not fit:
+
+- calling a target directly when everything else reaches it through a wrapper
+- drawing a dependency in a direction the repository has no precedent for
+- breaking a convention every neighbouring function follows
+
+Only edges the change **introduced** count. Without that comparison, every call a
+merely-touched function has always made gets reported — on `cobra`, six no-op
+edits produced five findings before this was fixed, and zero after.
+
+---
+
+## Putting it together
+
+Three questions, seven readings, one exit code:
+
+| | question | readings |
+| --- | --- | --- |
+| **mutation** | do the tests hold it up? | `score`, `strength`, `reach` |
+| **complexity** | can it be changed later? | `cognitive max`, `cognitive Δ` |
+| **graph** | does it fit what exists? | `redundant`, `inconsistent` |
+
+Plus CRAP, which ranks findings rather than gating.
+
+**There is no composite score.** One weighted number hides which axis failed and
+invites gaming.
 
 **No LLM, no network, no API key.** Every number comes from parsing the code and
 running its tests. Same commit in, same numbers out — which is what makes it safe
 to put in a loop, and safe to gate on.
-
-## The loop
-
-An agent has just written `Discount` and a test for it. The test covers **100% of
-statements**.
-
-(Trimmed: the readings that moved, and one of the twelve findings.)
-
-```
-$ metron --since main --axes all
-
-  reading            value   reference
-  ─────────────────────────────────────
-  mutation score      20%   ≥ 70%     L
-    test strength     20%   ≥ 80%     L    12 of 15 mutants survived
-    reach            100%   ≥ 85%     ✓    every mutant was executed
-
-  2 out of range
-
-  mutation
-    pricing/pricing.go:9  no test caught this change to Discount (CONDITIONALS_BOUNDARY)
-      - if total < 0 {
-      + if total <= 0 {
-      assert the behaviour at the boundary total == 0
-```
-
-Reach is 100%: the tests really do run every line. Strength is 20%: they run it
-and check almost nothing. And the last line is not a complaint — it is a task.
-Every surviving mutant carries the assertion it proves is missing, derived from
-the operator and its operands.
-
-The agent acts on those instructions and runs metron again:
-
-```
-  mutation score     100%   ≥ 70%     ✓
-    test strength    100%   ≥ 80%     ✓    0 of 15 mutants survived
-    reach            100%   ≥ 85%     ✓    every mutant was executed
-
-  all within range
-```
-
-Exit 0. Coverage was 100% before and after; only metron could tell the two apart.
 
 ## Install
 
@@ -166,147 +326,28 @@ together — and that every finding carries the change that closes it.
 drawn, so those readings report `n/a` rather than guessing. Never present that
 absence as a pass.
 
-## The readings
+## Every reading, in one table
 
-Full definitions, worked examples, and what each one is for:
-**[docs/metrics.md](docs/metrics.md)**.
+| reading | out of range means |
+| --- | --- |
+| **mutation score** | The change is not held up by tests. This is the gate. |
+| ↳ test strength | Tests run this code but assert too little about it. |
+| ↳ reach | Much of the change is never executed by any test. |
+| **cognitive max** | A changed function is hard to read. The output names it. |
+| **cognitive Δ** | You made an existing function worse instead of extracting. |
+| **redundant code** | Something is unreachable, or duplicates what already exists. |
+| **inconsistent code** | Something bypasses a wrapper, draws an unprecedented dependency, or breaks a local convention. |
+| CRAP *(per function)* | Complexity weighted by how poorly tested it is. Over 30 is the conventional limit. Ranks findings; does not gate. |
 
-Seven readings sit in the table; five of them gate. Each is followed by the
-specific findings behind it.
+Bold readings gate by default; change that with `--fail-on`. Every finding is
+printed with the specific change that closes it.
 
-### mutation — do the tests hold the code up?
+**Full definitions, the exact formulas, and a reproducible worked example for
+each: [docs/metrics.md](docs/metrics.md)** ([简体中文](docs/metrics.zh.md)).
 
-Mutants are generated inside the function bodies the change touched, each one a
-single deliberate edit. A mutant is *detected* if any test fails or hangs.
-
-| reading | computed as | out of range means |
-| --- | --- | --- |
-| **mutation score** | `detected / (detected + survived + uncovered)` | The change is not held up by tests. This is the gate. |
-| ↳ test strength | `detected / (detected + survived)` | Tests run this code but assert too little about it. |
-| ↳ reach | `1 − uncovered / total` | Much of the change is never executed by any test. |
-
-```
-  mutation
-    pricing/pricing.go:9  no test caught this change to Quote (CONDITIONALS_BOUNDARY)
-      - if total < 0 {
-      + if total <= 0 {
-```
-
-
-Each survivor carries the assertion it proves is missing, derived from the
-operator and its operands:
-
-```
-  mutation
-    pricing/pricing.go:9  no test caught this change to Quote (CONDITIONALS_BOUNDARY)
-      - if total < 0 {
-      + if total <= 0 {
-      assert the behaviour at the boundary total == 0
-```
-
-That last line is the point. `--format json` carries it as `detail`, so an agent
-iterating against metron gets a concrete, verifiable task rather than a number it
-has to interpret. It is derived, not generated — no model is involved, and the
-same commit always produces the same instruction.
-
-It is phrased as an assertion to add, never as a claim about what the tests do. A
-survivor cannot tell "this input is never supplied" from "it is supplied and the
-result is never checked", and saying the first when it is the second sends you to
-write a test that already exists.
-
-**Uncovered code counts against the score.** The dominant failure in
-agent-written code is 200 new lines with 20 tested well. Leaving uncovered
-mutants out of the denominator scores that near-perfect, and it is gamed by
-writing one excellent test for one tiny function. *Strength* asks "are the tests
-you wrote good tests"; the *score* asks "is this change held up by tests". Only
-the second deserves a gate. Mutants that fail to compile are excluded entirely —
-those are metron's fault, not yours, and are reported separately.
-
-### complexity — how hard is it to read and change?
-
-Cognitive complexity per the SonarSource specification, computed over `go/ast`:
-each construct that breaks linear flow costs 1, plus 1 for every level of nesting
-it sits inside.
-
-**Go's error guards are discounted.** `if err != nil { return err }` is 7.7% of
-every branch keyword in the Go standard library and more in application code. A
-Go reader takes it as one token, not a branch; counting it in full makes every Go
-function look complex and the metric stops discriminating. Only guards that
-purely bail out are discounted — anything with an `else`, or that handles the
-error, is a real branch. The undiscounted score stays in the JSON, comparable
-with gocognit.
-
-| reading | computed as | out of range means |
-| --- | --- | --- |
-| **cognitive max** | highest adjusted score among changed functions | A changed function is hard to read. The output names it. |
-| **cognitive Δ** | score now minus score at the merge base, matched by name and receiver | You made an existing function worse instead of extracting. |
-
-```
-  complexity
-    pricing/pricing.go:8  Quote (Δ +9, was 3)
-      CRAP 54 (10% of mutants caught) — over the usual limit of 30 · cognitive 7 · cyclomatic 8
-```
-
-Cyclomatic complexity, fan-out, parameter count, line count and nesting depth are
-computed for every changed function too. They appear on each finding and in
-`--format json`, but do not get readings of their own.
-
-### graph — does it fit what is already here?
-
-Read from a CodeGraph index: the symbols in the repository and the edges between
-them, compared against the merge base so only edges the change *introduced*
-count.
-
-| reading | computed as | out of range means |
-| --- | --- | --- |
-| **redundant code** | unreachable symbols + near-duplicates | Something you wrote did not need to exist. |
-| **inconsistent code** | bypassed wrappers + unprecedented dependency directions + broken local conventions | Something does not fit the codebase. |
-
-```
-  graph
-    pricing/pricing.go:22  unusedHelper is never reached
-      no inbound edge in the graph, and the identifier appears nowhere else in the source
-```
-
-These two are deliberately coarse. Five separate counters said the same thing five
-ways, and you act on all of them by reading the finding underneath. The individual
-counts stay in `--format json`.
-
-**There is no composite score.** One weighted number hides which reading failed
-and invites gaming.
-
-## CRAP — which one do I fix first?
-
-```
-CRAP(f) = cyclomatic(f)² × (1 − mutationScore(f))³ + cyclomatic(f)
-```
-
-[Change Risk Analysis and Predictions](https://www.artima.com/weblogs/viewpost.jsp?thread=210575), defined by
-Alberto Savoia in 2007 and implemented in Crap4j. Complexity is forgiven when the code is pinned and punished hard when
-it is not: cyclomatic 10 scores 10 fully tested, 110 untested. Over 30 is the
-conventional limit.
-
-metron departs from the original in one place, and it is the important one.
-Crap4j feeds on line coverage — the number this tool exists to distrust. Here the
-coverage term is the **per-function mutation score**, so a function with 100%
-coverage and no assertions stays dangerous instead of scoring as safe. That is
-precisely the case CRAP was invented to catch and the coverage-based version
-misses.
-
-It is **not an eighth reading**. It is per-function and its job is ranking, not
-gating, so it annotates and orders the complexity findings — and promotes a
-function the complexity axis passed over. In the example above, cyclomatic 8
-clears a threshold of 15 comfortably; at 10% of mutants caught it is still the
-worst thing in the change, and nothing else would have said so.
-
-CRAP needs both axes. Run without `--axes all` and the panel says so rather than
-printing nothing:
-
-```
-  all within range · risk ranking needs the mutation axis — add --axes all
-```
-
-A function with no mutants gets no score, not an invented one.
+Numbers with no row of their own — cyclomatic complexity, fan-out, parameter
+count, nesting depth, the individual graph rule counts, the raw mutant tally —
+are all in `--format json` under `diagnostics`.
 
 ## Behaviour worth knowing
 
