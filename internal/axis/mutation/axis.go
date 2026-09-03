@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"golang.org/x/tools/go/packages"
@@ -380,19 +381,45 @@ func relativeTo(root, abs string) (string, bool) {
 
 // planner builds the invocation for a mutant: the packages that can reach it,
 // the tests that survived the flakiness screen, and the derived timeout.
+//
+// Every worker calls this concurrently, so the source cache is guarded. It was
+// not, and the race detector found it the moment an end-to-end test ran real
+// mutants through the pool: a map written from several goroutines at once,
+// which corrupts silently rather than failing loudly.
 func (a *Axis) planner(t *target.Target, pg *gopkg.Graph, scope, allowed []string,
 	timeout time.Duration) Planner {
 
+	var mu sync.Mutex
 	srcCache := map[string][]byte{}
+
+	readSource := func(rel string) ([]byte, error) {
+		mu.Lock()
+		src, ok := srcCache[rel]
+		mu.Unlock()
+		if ok {
+			return src, nil
+		}
+
+		// Read outside the lock: two workers racing to load the same file both
+		// do the work once, which is cheaper than serialising every read.
+		b, err := os.ReadFile(filepath.Join(t.Root, rel))
+		if err != nil {
+			return nil, err
+		}
+		mu.Lock()
+		if existing, ok := srcCache[rel]; ok {
+			b = existing // keep one copy so callers can compare identity
+		} else {
+			srcCache[rel] = b
+		}
+		mu.Unlock()
+		return b, nil
+	}
+
 	return func(m Mutant) (Invocation, []byte, error) {
-		src, ok := srcCache[m.File]
-		if !ok {
-			b, err := os.ReadFile(filepath.Join(t.Root, m.File))
-			if err != nil {
-				return Invocation{}, nil, err
-			}
-			srcCache[m.File] = b
-			src = b
+		src, err := readSource(m.File)
+		if err != nil {
+			return Invocation{}, nil, err
 		}
 		pkgs := pg.TestScope(m.Package)
 		if len(pkgs) == 0 {
