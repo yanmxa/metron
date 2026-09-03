@@ -112,6 +112,30 @@ type Observation struct {
 	After   string `json:"after,omitempty"`  // for mutation: the mutated source line
 }
 
+// PerFunc is what one axis measured about a single function.
+//
+// Axes report independently, but some questions need two of them at once —
+// how risky a function is depends on both how complex it is and how well it is
+// tested. Naming functions the same way lets those be combined afterwards
+// without either axis having to know about the other.
+type PerFunc struct {
+	Path     string `json:"path"`
+	Function string `json:"function"`
+	Line     int    `json:"line,omitempty"`
+	EndLine  int    `json:"endLine,omitempty"`
+
+	Cyclomatic int  `json:"cyclomatic,omitempty"` // from the complexity axis
+	Cognitive  int  `json:"cognitive,omitempty"`
+	Delta      int  `json:"delta,omitempty"`
+	IsNew      bool `json:"isNew,omitempty"`
+
+	Mutants  int `json:"mutants,omitempty"` // from the mutation axis
+	Detected int `json:"detected,omitempty"`
+}
+
+// Key identifies a function across axes.
+func (f PerFunc) Key() string { return f.Path + ":" + f.Function }
+
 // Result is one axis's contribution to the panel.
 type Result struct {
 	AxisID       string        `json:"axis"`
@@ -122,8 +146,11 @@ type Result struct {
 	// counts already implied by a ratio, and metron's own health. They reach
 	// --format json and nothing else.
 	Diagnostics map[string]float64 `json:"diagnostics,omitempty"`
-	Partial     bool               `json:"partial"` // budget ran out; readings describe a sample
-	Duration    time.Duration      `json:"durationMs"`
+	// Funcs is the per-function detail behind the readings, for combining
+	// across axes. Not rendered by the panel.
+	Funcs    []PerFunc     `json:"funcs,omitempty"`
+	Partial  bool          `json:"partial"` // budget ran out; readings describe a sample
+	Duration time.Duration `json:"durationMs"`
 }
 
 // Headlines returns the measures that gate.

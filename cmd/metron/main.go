@@ -16,6 +16,7 @@ import (
 	"github.com/yanmxa/metron/internal/axis/complexity"
 	"github.com/yanmxa/metron/internal/axis/graph"
 	"github.com/yanmxa/metron/internal/axis/mutation"
+	"github.com/yanmxa/metron/internal/crap"
 	"github.com/yanmxa/metron/internal/gate"
 	"github.com/yanmxa/metron/internal/panel"
 	"github.com/yanmxa/metron/internal/target"
@@ -74,6 +75,10 @@ func run() error {
 		}
 		results = append(results, r)
 	}
+
+	// CRAP needs both complexity and mutation, so it is computed once every
+	// axis has reported rather than inside either of them.
+	crap.Apply(results)
 
 	switch *format {
 	case "json":

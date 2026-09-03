@@ -184,8 +184,14 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 	}
 
 	maxCog, maxRaw, maxDelta, over := 0, 0, 0, 0
+	maxCyc, maxFanOut, maxParams, maxLines, maxNest := 0, 0, 0, 0, 0
 	var cogAt, deltaAt string
 	for _, s := range scores {
+		maxCyc = larger(maxCyc, s.Score.Cyclomatic)
+		maxFanOut = larger(maxFanOut, s.Score.FanOut)
+		maxParams = larger(maxParams, s.Score.Params)
+		maxLines = larger(maxLines, s.Score.Lines)
+		maxNest = larger(maxNest, s.Score.MaxNesting)
 		if s.Score.Adjusted > maxCog {
 			maxCog, cogAt = s.Score.Adjusted, s.Fn.Label()
 		}
@@ -223,14 +229,39 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 			Note:   deltaAt,
 		},
 	}
+	// Everything the axis measured, whether or not it earns a row. Cyclomatic
+	// complexity in particular is computed for every changed function and shown
+	// in each finding; it belongs here too rather than only in prose.
 	r.Diagnostics = map[string]float64{
 		"complexity.over_threshold":    float64(over),
 		"complexity.cognitive_raw_max": float64(maxRaw),
+		"complexity.cyclomatic_max":    float64(maxCyc),
+		"complexity.fan_out_max":       float64(maxFanOut),
+		"complexity.params_max":        float64(maxParams),
+		"complexity.lines_max":         float64(maxLines),
+		"complexity.nesting_max":       float64(maxNest),
 		"complexity.functions":         float64(len(scores)),
 	}
 
 	r.Observations = a.observations(scores)
+	r.Funcs = perFunc(scores)
 	return r
+}
+
+// perFunc exposes every changed function, not only the ones worth an
+// observation: combining with the mutation axis can promote a function this
+// axis considered unremarkable.
+func perFunc(scores []FuncScore) []axis.PerFunc {
+	out := make([]axis.PerFunc, 0, len(scores))
+	for _, s := range scores {
+		out = append(out, axis.PerFunc{
+			Path: s.Fn.Path, Function: s.Fn.Label(),
+			Line: s.Fn.StartLine, EndLine: s.Fn.EndLine,
+			Cyclomatic: s.Score.Cyclomatic, Cognitive: s.Score.Adjusted,
+			Delta: s.Delta, IsNew: s.IsNew,
+		})
+	}
+	return out
 }
 
 // observations reports the functions worth looking at: anything over the
@@ -270,6 +301,13 @@ func (a *Axis) observations(scores []FuncScore) []axis.Observation {
 		})
 	}
 	return out
+}
+
+func larger(a, b int) int {
+	if b > a {
+		return b
+	}
+	return a
 }
 
 func statusFor(ok bool) axis.Status {

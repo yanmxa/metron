@@ -185,6 +185,7 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 	all := append(executed, notExecuted(mutants, runnable)...)
 	tally := Count(all)
 	r.Measures = tally.Measures(a.cfg)
+	r.Funcs = perFunc(all)
 	r.Observations = a.observations(all)
 	r.Partial = truncated || capped
 	if capped {
@@ -307,8 +308,14 @@ func (a *Axis) generate(ctx context.Context, t *target.Target, pg *gopkg.Graph,
 					}
 				}
 				if touched {
+					// Labelled the way target.Func does, so per-function
+					// readings from different axes line up.
+					label := fd.Name.Name
+					if recv := recvOf(fd); recv != "" {
+						label = "(" + recv + ")." + label
+					}
 					spans = append(spans, FuncSpan{
-						Label: fd.Name.Name, Decl: fd, StartLine: start, EndLine: end,
+						Label: label, Decl: fd, StartLine: start, EndLine: end,
 					})
 				}
 			}
@@ -363,6 +370,60 @@ func recheckKills(ctx context.Context, r *Runner, ms []Mutant, plan Planner) []M
 // notExecuted returns the mutants that never entered the worker pool: the ones
 // the coverage filter ruled out, and the ones whose verdict came from the
 // checkpoint.
+// perFunc groups verdicts by the function they landed in, so how well a single
+// function is tested can be combined with how complex it is.
+func perFunc(ms []Mutant) []axis.PerFunc {
+	byKey := map[string]*axis.PerFunc{}
+	var order []string
+	for _, m := range ms {
+		switch m.Outcome {
+		case Killed, TimedOut, Survived, NotCovered:
+		default:
+			continue // skipped, errored and non-viable say nothing about the tests
+		}
+		k := m.File + ":" + m.Function
+		f, ok := byKey[k]
+		if !ok {
+			f = &axis.PerFunc{Path: m.File, Function: m.Function, Line: m.Line}
+			byKey[k] = f
+			order = append(order, k)
+		}
+		f.Mutants++
+		if m.Outcome == Killed || m.Outcome == TimedOut {
+			f.Detected++
+		}
+	}
+	out := make([]axis.PerFunc, 0, len(order))
+	for _, k := range order {
+		out = append(out, *byKey[k])
+	}
+	return out
+}
+
+// recvOf renders a method receiver as a bare type name.
+func recvOf(fd *ast.FuncDecl) string {
+	if fd.Recv == nil || len(fd.Recv.List) == 0 {
+		return ""
+	}
+	var name func(ast.Expr) string
+	name = func(e ast.Expr) string {
+		switch t := e.(type) {
+		case *ast.Ident:
+			return t.Name
+		case *ast.StarExpr:
+			return name(t.X)
+		case *ast.IndexExpr:
+			return name(t.X)
+		case *ast.IndexListExpr:
+			return name(t.X)
+		case *ast.SelectorExpr:
+			return t.Sel.Name
+		}
+		return ""
+	}
+	return name(fd.Recv.List[0].Type)
+}
+
 func notExecuted(all, ran []Mutant) []Mutant {
 	inPool := make(map[string]bool, len(ran))
 	for _, m := range ran {
