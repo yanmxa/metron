@@ -68,7 +68,7 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 	if serr != nil {
 		return nil, serr
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Baseline first: it produces the coverage profile, the quarantine set and
 	// the reference duration the per-mutant timeout is derived from. Every

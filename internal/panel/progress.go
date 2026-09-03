@@ -63,7 +63,7 @@ func (p *Progress) write(line string) {
 	if pad < 0 {
 		pad = 0
 	}
-	fmt.Fprintf(p.w, "\r%s%s", line, strings.Repeat(" ", pad))
+	_, _ = fmt.Fprintf(p.w, "\r%s%s", line, strings.Repeat(" ", pad))
 	p.last = line
 }
 
@@ -75,7 +75,7 @@ func (p *Progress) Clear() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.last != "" {
-		fmt.Fprintf(p.w, "\r%s\r", strings.Repeat(" ", len(p.last)))
+		_, _ = fmt.Fprintf(p.w, "\r%s\r", strings.Repeat(" ", len(p.last)))
 		p.last = ""
 	}
 }

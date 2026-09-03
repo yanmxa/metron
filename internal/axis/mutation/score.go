@@ -156,10 +156,3 @@ func (t Tally) Diagnostics() map[string]float64 {
 		"mutation.not_viable_rate": t.NotViableRate(),
 	}
 }
-
-func statusFor(ok bool) axis.Status {
-	if ok {
-		return axis.StatusOK
-	}
-	return axis.StatusFail
-}

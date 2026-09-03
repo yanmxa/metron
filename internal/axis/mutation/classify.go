@@ -1,3 +1,13 @@
+// Package mutation measures whether a test suite actually holds the code up.
+//
+// It rewrites the changed code in small, deliberate ways — flipping a
+// comparison, dropping a returned error, forcing a branch — and runs the tests
+// against each rewrite. A mutation nothing notices is a gap, and the operator
+// that produced it says which assertion is missing.
+//
+// Everything is scoped to the functions a change touched, so a run costs tens
+// of seconds rather than scanning a whole repository. See
+// docs/mutation-design.md for the measurements behind that design.
 package mutation
 
 import (

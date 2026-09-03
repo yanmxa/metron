@@ -85,8 +85,8 @@ func OpenStore(root, baseSHA, scopeDigest, configHash string, fresh bool) (*Stor
 		want.Baseline = prev.Baseline
 	} else {
 		// A stale checkpoint is worse than none: start the files clean.
-		os.Remove(filepath.Join(dir, "results.jsonl"))
-		os.Remove(filepath.Join(dir, "cover.out"))
+		_ = os.Remove(filepath.Join(dir, "results.jsonl"))
+		_ = os.Remove(filepath.Join(dir, "cover.out"))
 	}
 
 	s := &Store{dir: dir, manifest: want}
@@ -144,7 +144,7 @@ func (s *Store) Close() error {
 	if s == nil {
 		return nil
 	}
-	s.w.Flush()
+	_ = s.w.Flush()
 	return s.f.Close()
 }
 
@@ -182,7 +182,7 @@ func readResults(path string) map[string]Mutant {
 	if err != nil {
 		return out
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -235,7 +235,7 @@ func ScopeDigest(root string, dirs []string) (string, error) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
 	h := sha256.New()
 	for _, e := range entries {
-		fmt.Fprintf(h, "%s:%s\n", e.path, e.sum)
+		_, _ = fmt.Fprintf(h, "%s:%s\n", e.path, e.sum)
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
@@ -246,7 +246,7 @@ func (c Config) Hash() string {
 	ops := append([]string{}, c.Operators...)
 	sort.Strings(ops)
 	h := sha256.New()
-	fmt.Fprintf(h, "ops=%s;baseline=%d;factor=%.2f;tmin=%s;tmax=%s;paranoid=%v",
+	_, _ = fmt.Fprintf(h, "ops=%s;baseline=%d;factor=%.2f;tmin=%s;tmax=%s;paranoid=%v",
 		strings.Join(ops, ","), c.BaselineRounds, c.TimeoutFactor,
 		c.TimeoutMin, c.TimeoutMax, c.Paranoid)
 	return hex.EncodeToString(h.Sum(nil))[:16]

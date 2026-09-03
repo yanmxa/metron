@@ -146,7 +146,7 @@ func runOne(ctx context.Context, r *Runner, m Mutant, plan Planner) Mutant {
 		m.Outcome, m.Detail = Errored, err.Error()
 		return m
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	overlay, err := WriteOverlay(dir, r.Root, m, src)
 	if err != nil {

@@ -59,10 +59,10 @@ func Open(root string) (*sql.DB, func(), error) {
 	if err == nil {
 		if err = db.Ping(); err == nil {
 			if _, err = db.Exec("SELECT 1 FROM nodes LIMIT 1"); err == nil {
-				return db, func() { db.Close() }, nil
+				return db, func() { _ = db.Close() }, nil
 			}
 		}
-		db.Close()
+		_ = db.Close()
 	}
 
 	tmp, cerr := snapshot(path)
@@ -71,10 +71,10 @@ func Open(root string) (*sql.DB, func(), error) {
 	}
 	db, err = sql.Open("sqlite", "file:"+tmp+"?mode=ro")
 	if err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return nil, nil, fmt.Errorf("open codegraph snapshot: %w", err)
 	}
-	return db, func() { db.Close(); os.Remove(tmp) }, nil
+	return db, func() { _ = db.Close(); _ = os.Remove(tmp) }, nil
 }
 
 func snapshot(path string) (string, error) {
@@ -82,16 +82,16 @@ func snapshot(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	dst, err := os.CreateTemp("", "metron-codegraph-*.db")
 	if err != nil {
 		return "", err
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, src); err != nil {
-		os.Remove(dst.Name())
+		_ = os.Remove(dst.Name())
 		return "", err
 	}
 	return dst.Name(), nil

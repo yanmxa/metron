@@ -30,24 +30,24 @@ func Load(ctx context.Context, db *sql.DB) (*Graph, error) {
 		var n Node
 		if err := rows.Scan(&n.ID, &n.Kind, &n.Name, &n.Qualified, &n.File,
 			&n.StartLine, &n.EndLine, &n.Signature); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		g.Nodes[n.ID] = n
 		g.byFile[n.File] = append(g.byFile[n.File], n.ID)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	erows, err := db.QueryContext(ctx, `
 		SELECT source, target, kind, COALESCE(line, 0) FROM edges`)
 	if err != nil {
 		return nil, fmt.Errorf("read edges: %w", err)
 	}
-	defer erows.Close()
+	defer func() { _ = erows.Close() }()
 	for erows.Next() {
 		var e Edge
 		if err := erows.Scan(&e.Source, &e.Target, &e.Kind, &e.Line); err != nil {
