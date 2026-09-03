@@ -29,6 +29,13 @@ jobs:
       - run: go build ./...
       - run: go test -race ./...
 
+      # The skill is written once in agent/metron.md and generated for each
+      # assistant. A checked-in copy that has drifted is worse than none.
+      - run: make skill-check
+
+      - name: installer is valid POSIX sh
+        run: sh -n install.sh
+
   lint:
     runs-on: ubuntu-latest
     steps:

@@ -72,15 +72,32 @@ metron --since main --axes all --format json
   `1` 出错。
 - **重跑很便宜。** 判定按内容哈希缓存,改一个函数不会重测其余:冷跑 8.3 秒,全命中 0.26 秒。
 
-给 agent 一条规则,它就能自己闭环:
+### 安装 skill
 
-```markdown
-改完 Go 代码后跑 `metron --since main --axes all --format json`。
-对每一条发现,照它的 `detail` 去做,然后再跑一次。
-退出码为 0 才算完。绝不允许改 metron 的阈值来让它通过。
+上面这套指令是一份文档:[`agent/metron.md`](agent/metron.md)。每个助手读指令的**路径和
+格式都不一样**,所以安装脚本会把同一份内容写到你用的那个助手会去找的地方:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yanmxa/metron/main/install.sh | sh -s -- --skill
 ```
 
-最后那句很重要。**闸门只有在 agent 挪不动它的时候才有意义。**
+| 助手 | 文件 |
+| --- | --- |
+| Claude Code | `.claude/skills/metron/SKILL.md` |
+| Cursor | `.cursor/rules/metron.mdc` |
+| Windsurf | `.windsurf/rules/metron.md` |
+| GitHub Copilot | `.github/copilot-instructions.md` |
+| Codex CLI、Amp 等 | `AGENTS.md` |
+
+不带参数时,它会装到**仓库里已经存在**的那些助手上,一个都没有就退回 `AGENTS.md`。
+`--agent all` 会全部写一遍。`AGENTS.md` 里 metron 的段落有标记包起来,重复运行是**替换**
+而不是追加,你自己写的内容不会被动。
+
+它给 agent 的规则里,最后一条比其余都重要:
+
+> 绝不允许改 `metron.json` 的阈值、删测试、或者加 `//nolint` 来让读数通过。
+
+**闸门只有在被量的一方挪不动它的时候才有意义。**
 
 ## 和其它工具比
 

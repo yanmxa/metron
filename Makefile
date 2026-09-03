@@ -37,3 +37,15 @@ check: ## Everything CI runs
 .PHONY: clean
 clean: ## Remove build output and caches
 	rm -rf bin/ .metron/
+
+.PHONY: skill
+skill: ## Regenerate the in-repo agent skill from agent/metron.md
+	@./install.sh --skill-only --agent claude
+
+.PHONY: skill-check
+skill-check: ## Fail if the generated skill has drifted from agent/metron.md
+	@cp .claude/skills/metron/SKILL.md /tmp/metron-skill-before
+	@./install.sh --skill-only --agent claude >/dev/null
+	@diff -q /tmp/metron-skill-before .claude/skills/metron/SKILL.md >/dev/null || { \
+	  echo "the checked-in skill is out of date; run: make skill"; exit 1; }
+	@echo "skill is in sync with agent/metron.md"

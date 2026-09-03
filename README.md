@@ -80,16 +80,35 @@ Three things make it usable inside a loop:
   iteration that changes one function does not re-measure the rest: 8.3s cold,
   0.26s fully cached.
 
-Give the agent a rule and it can close the loop itself:
+### Install the skill
 
-```markdown
-After changing Go code, run `metron --since main --axes all --format json`.
-For every finding, do what its `detail` says, then run it again.
-Stop when the exit code is 0. Never edit metron's thresholds to make it pass.
+The instructions above are one document, [`agent/metron.md`](agent/metron.md).
+Every assistant reads instructions from a different path in a different wrapper,
+so the installer writes the same body wherever yours looks for it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yanmxa/metron/main/install.sh | sh -s -- --skill
 ```
 
-That last sentence matters. The gate is only worth having if the agent cannot
-move it.
+| assistant | file |
+| --- | --- |
+| Claude Code | `.claude/skills/metron/SKILL.md` |
+| Cursor | `.cursor/rules/metron.mdc` |
+| Windsurf | `.windsurf/rules/metron.md` |
+| GitHub Copilot | `.github/copilot-instructions.md` |
+| Codex CLI, Amp, others | `AGENTS.md` |
+
+With no argument it installs for whichever assistants it finds in the repository,
+falling back to `AGENTS.md`. `--agent all` writes every one. The `AGENTS.md`
+section is delimited, so re-running replaces it rather than appending, and leaves
+the rest of your file alone.
+
+The rule it gives the agent ends with one line that matters more than the rest:
+
+> Never edit `metron.json` thresholds, delete tests, or add `//nolint` to make a
+> reading pass.
+
+A gate is only worth having if the thing being gated cannot move it.
 
 ## How it compares
 
