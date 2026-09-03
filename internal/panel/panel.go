@@ -34,7 +34,7 @@ func (p *Panel) Render() string {
 
 	rows := p.rows()
 	if len(rows) == 0 {
-		b.WriteString("  没有可测的改动\n")
+		b.WriteString("  nothing measurable in this change\n")
 		return b.String()
 	}
 
@@ -45,7 +45,7 @@ func (p *Panel) Render() string {
 		rangeW = max(rangeW, width(r.ref))
 	}
 
-	fmt.Fprintf(&b, "  %s  %s   %s\n", pad("指标", labelW), padLeft("读数", valueW), pad("参考区间", rangeW))
+	fmt.Fprintf(&b, "  %s  %s   %s\n", pad("reading", labelW), padLeft("value", valueW), pad("reference", rangeW))
 	b.WriteString("  " + strings.Repeat("─", labelW+valueW+rangeW+8) + "\n")
 	for _, r := range rows {
 		line := fmt.Sprintf("  %s  %s   %s  %s",
@@ -60,6 +60,10 @@ func (p *Panel) Render() string {
 	return b.String()
 }
 
+// unmeasuredFlag marks a reading metron could not take. It is neither a pass
+// nor a failure — the panel says so rather than letting it look like either.
+const unmeasuredFlag = "n/a"
+
 type row struct{ label, value, ref, flag, note string }
 
 func (p *Panel) rows() []row {
@@ -67,7 +71,7 @@ func (p *Panel) rows() []row {
 	for _, res := range p.Results {
 		for _, m := range res.Measures {
 			if m.Status == axis.StatusUnmeasured {
-				rows = append(rows, row{label: m.Label, value: "—", flag: "未测", note: m.Note})
+				rows = append(rows, row{label: m.Label, value: "—", flag: unmeasuredFlag, note: m.Note})
 				continue
 			}
 			rows = append(rows, row{
@@ -89,7 +93,7 @@ func (p *Panel) footer(rows []row) string {
 		switch r.flag {
 		case "H", "L":
 			out++
-		case "未测":
+		case unmeasuredFlag:
 			unmeasured++
 		}
 	}
@@ -98,19 +102,19 @@ func (p *Panel) footer(rows []row) string {
 	for _, res := range p.Results {
 		notes = append(notes, res.Notes...)
 		if res.Partial {
-			notes = append(notes, fmt.Sprintf("%s 轴预算耗尽,读数只覆盖了一部分", res.AxisID))
+			notes = append(notes, fmt.Sprintf("the %s axis ran out of budget; its readings cover only a sample", res.AxisID))
 		}
 	}
 
 	b.WriteString("\n")
 	switch {
 	case out > 0:
-		fmt.Fprintf(&b, "  %d 项超出区间", out)
+		fmt.Fprintf(&b, "  %d out of range", out)
 	default:
-		b.WriteString("  全部在区间内")
+		b.WriteString("  all within range")
 	}
 	if unmeasured > 0 {
-		fmt.Fprintf(&b, " · %d 项未测", unmeasured)
+		fmt.Fprintf(&b, " · %d unmeasured", unmeasured)
 	}
 	for _, n := range notes {
 		b.WriteString(" · " + n)

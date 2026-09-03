@@ -67,8 +67,8 @@ func Orphans(g *Graph, changed []Node, iu *IdentUse, appPkg func(file string) bo
 		}
 		out = append(out, Finding{
 			Rule: "orphan", Node: n,
-			Title:  n.Label() + " 没有任何调用者",
-			Detail: "图上无入边,源码里也找不到这个标识符的其它出现",
+			Title:  n.Label() + " is never reached",
+			Detail: "no inbound edge in the graph, and the identifier appears nowhere else in the source",
 		})
 	}
 	return out
@@ -136,8 +136,8 @@ func NearDuplicates(g *Graph, changed []Node, th Thresholds) []Finding {
 		other := best.node
 		out = append(out, Finding{
 			Rule: "near-duplicate", Node: n, Other: &other,
-			Title: fmt.Sprintf("%s 和 %s 在做同一件事", n.Label(), other.Label()),
-			Detail: fmt.Sprintf("调用了几乎同一组东西(Jaccard %.2f),名字也重合(%.2f)· %s:%d",
+			Title: fmt.Sprintf("%s and %s do the same job", n.Label(), other.Label()),
+			Detail: fmt.Sprintf("calls almost the same set (Jaccard %.2f) and the names overlap (%.2f) · %s:%d",
 				best.jac, best.names, other.File, other.StartLine),
 		})
 	}
@@ -172,8 +172,8 @@ func Reimplementations(g *Graph, changed []Node, th Thresholds) []Finding {
 			o := other
 			out = append(out, Finding{
 				Rule: "reimplementation", Node: n, Other: &o,
-				Title: fmt.Sprintf("%s 可能是在重复 %s", n.Label(), other.Label()),
-				Detail: fmt.Sprintf("签名相同 %s,名字高度重合,但没有调用它 · %s:%d",
+				Title: fmt.Sprintf("%s may be reimplementing %s", n.Label(), other.Label()),
+				Detail: fmt.Sprintf("identical signature %s and a near-identical name, but it never calls it · %s:%d",
 					n.Signature, other.File, other.StartLine),
 			})
 			break

@@ -167,7 +167,7 @@ func RunBaseline(ctx context.Context, r *Runner, pkgs []string, workers, rounds 
 	if len(always) > 0 {
 		sort.Strings(always)
 		b.Red = true
-		b.RedDetail = "baseline 里这些测试始终失败: " + join(always, 5)
+		b.RedDetail = "these tests fail every time on the unmutated suite: " + join(always, 5)
 	}
 	return b, nil
 }

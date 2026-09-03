@@ -25,13 +25,13 @@ func (a *Axis) ID() string { return "mutation" }
 
 func (a *Axis) Available(_ context.Context, t *target.Target) (bool, string) {
 	if _, err := exec.LookPath("go"); err != nil {
-		return false, "PATH 里没有 go"
+		return false, "go is not on PATH"
 	}
 	if len(t.GoFiles()) == 0 {
 		return false, "no Go files changed"
 	}
 	if _, err := os.Stat(filepath.Join(t.Root, "go.mod")); err != nil {
-		return false, "不是一个 Go module"
+		return false, "not a Go module"
 	}
 	return true, ""
 }
@@ -49,12 +49,12 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 	targets, notes := a.targetPackages(t, pg)
 	r.Notes = append(r.Notes, notes...)
 	if len(targets) == 0 {
-		return unmeasuredResult(r, a.cfg, "改动没有落在可测的 Go 包里"), nil
+		return unmeasuredResult(r, a.cfg, "the change touches no measurable Go package"), nil
 	}
 
 	scope := testScope(pg, targets)
 	if len(scope) == 0 {
-		return unmeasuredResult(r, a.cfg, "改动涉及的包没有任何测试"), nil
+		return unmeasuredResult(r, a.cfg, "the packages this change touches have no tests"), nil
 	}
 
 	// A checkpoint makes an interrupted run resumable. Mutation runs are long
@@ -83,7 +83,7 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 			Duration:   time.Duration(snap.DurationMS) * time.Millisecond,
 			AllTests:   snap.AllTests, CoverPath: coverPath,
 		}
-		r.Notes = append(r.Notes, "沿用上次的 baseline 与覆盖率")
+		r.Notes = append(r.Notes, "reusing the previous baseline and coverage")
 	} else {
 		send(prog, axis.Progress{AxisID: a.ID(), Stage: "baseline"})
 		base, err = RunBaseline(ctx, runner, scope, a.cfg.Workers, a.cfg.BaselineRounds,
@@ -93,14 +93,14 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 		}
 		if base.Red {
 			// Scoring against a red suite makes every mutant look killed.
-			return unmeasuredResult(r, a.cfg, "baseline 套件本身是红的:"+base.RedDetail), nil
+			return unmeasuredResult(r, a.cfg, "the baseline suite is red: "+base.RedDetail), nil
 		}
 		if err := store.SaveBaseline(base); err != nil {
 			return nil, err
 		}
 	}
 	if q := base.Quarantined(); len(q) > 0 {
-		r.Notes = append(r.Notes, fmt.Sprintf("隔离了 %d 个抖动测试(%s)", len(q), join(q, 3)))
+		r.Notes = append(r.Notes, fmt.Sprintf("quarantined %d flaky test(s): %s", len(q), join(q, 3)))
 	}
 
 	send(prog, axis.Progress{AxisID: a.ID(), Stage: "generate"})
@@ -109,17 +109,17 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 		return nil, err
 	}
 	if len(mutants) == 0 {
-		return unmeasuredResult(r, a.cfg, "改动里没有可变异的语句"), nil
+		return unmeasuredResult(r, a.cfg, "nothing in the change can be mutated"), nil
 	}
 	for reason, n := range suppressed {
-		r.Notes = append(r.Notes, fmt.Sprintf("抑制 %d 个:%s", n, reason))
+		r.Notes = append(r.Notes, fmt.Sprintf("suppressed %d: %s", n, reason))
 	}
 
 	// Coverage pre-filter: a mutant on a line nothing executes cannot be
 	// killed, so it is classified without ever being run.
 	ci, cerr := BuildCoverIndex(coverPath, pg.DirOf, t.Root)
 	if cerr != nil {
-		r.Notes = append(r.Notes, "覆盖率预筛不可用:"+cerr.Error())
+		r.Notes = append(r.Notes, "coverage pre-filter unavailable: "+cerr.Error())
 	}
 	var runnable []Mutant
 	reused := 0
@@ -138,7 +138,7 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 		runnable = append(runnable, mutants[i])
 	}
 	if reused > 0 {
-		r.Notes = append(r.Notes, fmt.Sprintf("复用了 %d 个已评过的变异体", reused))
+		r.Notes = append(r.Notes, fmt.Sprintf("reused %d verdicts from the checkpoint", reused))
 	}
 
 	runnable = Stratify(runnable)
@@ -188,10 +188,10 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 	r.Observations = a.observations(all)
 	r.Partial = truncated || capped
 	if capped {
-		r.Notes = append(r.Notes, fmt.Sprintf("变异体上限 %d,分层采样后截断", a.cfg.MaxMutants))
+		r.Notes = append(r.Notes, fmt.Sprintf("capped at %d mutants, sampled across every changed function", a.cfg.MaxMutants))
 	}
 	if truncated {
-		r.Notes = append(r.Notes, fmt.Sprintf("预算用尽,%d 个变异体没评上", tally.Skipped))
+		r.Notes = append(r.Notes, fmt.Sprintf("budget spent; %d mutants went unscored", tally.Skipped))
 	}
 	return r, nil
 }
@@ -217,7 +217,7 @@ func (a *Axis) targetPackages(t *target.Target, pg *gopkg.Graph) (map[string][]t
 		out[p.ImportPath] = append(out[p.ImportPath], cf)
 	}
 	for p := range skippedCgo {
-		notes = append(notes, "跳过 cgo 包 "+p+"(overlay 对 cgo 有已知限制)")
+		notes = append(notes, "skipped cgo package "+p+" (overlay has known limitations with cgo)")
 	}
 	return out, notes
 }
@@ -393,7 +393,7 @@ func (a *Axis) tooSlow(base *Baseline, n int) (string, bool) {
 		return "", true
 	}
 	return fmt.Sprintf(
-		"套件太慢:每个变异体约 %s × %d 个,预算 %s 只够评 ~%d 个(不足 %.0f%%),不出分",
+		"suite too slow: ~%s per mutant × %d mutants, and a %s budget buys only ~%d (under %.0f%%) — not scoring",
 		base.Duration.Round(time.Millisecond), n, a.cfg.Budget, affordable,
 		a.cfg.MinSampleShare*100), false
 }
@@ -454,7 +454,7 @@ func (a *Axis) observations(ms []Mutant) []axis.Observation {
 	for _, m := range live {
 		out = append(out, axis.Observation{
 			Path: m.File, Line: m.Line, Kind: "survived-mutant",
-			Title:  fmt.Sprintf("%s 改成这样,测试依然全绿(%s)", m.Function, m.Operator),
+			Title:  fmt.Sprintf("no test caught this change to %s (%s)", m.Function, m.Operator),
 			Before: m.Before, After: m.After,
 		})
 	}
@@ -463,7 +463,7 @@ func (a *Axis) observations(ms []Mutant) []axis.Observation {
 
 func unmeasuredResult(r *axis.Result, cfg Config, why string) *axis.Result {
 	r.Measures = []axis.Measure{{
-		Key: "mutation.score", Label: "变异得分", Headline: true,
+		Key: "mutation.score", Label: "mutation score", Headline: true,
 		Status: axis.StatusUnmeasured, Note: why,
 	}}
 	return r

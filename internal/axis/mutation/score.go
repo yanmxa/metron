@@ -98,7 +98,7 @@ func (t Tally) Measures(cfg Config) []axis.Measure {
 		m := axis.Measure{Key: key, Label: label, Unit: axis.UnitRatio, Headline: headline}
 		if !ok {
 			m.Status = axis.StatusUnmeasured
-			m.Note = "没有可评分的变异体"
+			m.Note = "no scoreable mutants"
 			return m
 		}
 		m.Value, m.RefLow = v, ref
@@ -115,23 +115,23 @@ func (t Tally) Measures(cfg Config) []axis.Measure {
 	reach, rok := t.Reach()
 
 	out := []axis.Measure{
-		measure("mutation.score", "变异得分", score, sok, lo(cfg.RefScore), true),
-		measure("mutation.strength", "测试锐度(只看跑到的)", strength, stok, lo(cfg.RefStrength), false),
-		measure("mutation.reach", "触及率", reach, rok, lo(cfg.RefReach), false),
+		measure("mutation.score", "mutation score", score, sok, lo(cfg.RefScore), true),
+		measure("mutation.strength", "test strength", strength, stok, lo(cfg.RefStrength), false),
+		measure("mutation.reach", "reach", reach, rok, lo(cfg.RefReach), false),
 	}
 	zero := 0.0
 	out = append(out, axis.Measure{
-		Key: "mutation.survived", Label: "存活变异体",
+		Key: "mutation.survived", Label: "surviving mutants",
 		Value: float64(t.Survived), Unit: axis.UnitCount, RefHigh: &zero,
 		Status: statusFor(t.Survived == 0),
 	})
 	out = append(out, axis.Measure{
-		Key: "mutation.not_covered", Label: "未覆盖变异体",
+		Key: "mutation.not_covered", Label: "uncovered mutants",
 		Value: float64(t.NotCovered), Unit: axis.UnitCount, RefHigh: &zero,
 		Status: statusFor(t.NotCovered == 0),
 	})
 	out = append(out, axis.Measure{
-		Key: "mutation.not_viable_rate", Label: "生成器废品率(metron 自身诊断)",
+		Key: "mutation.not_viable_rate", Label: "non-viable rate",
 		Value: t.NotViableRate(), Unit: axis.UnitRatio, RefHigh: &hiRate,
 		Status: statusFor(t.NotViableRate() <= hiRate),
 	})

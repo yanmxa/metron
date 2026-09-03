@@ -36,7 +36,7 @@ func (a *Axis) ID() string { return "graph" }
 
 func (a *Axis) Available(_ context.Context, t *target.Target) (bool, string) {
 	if !HasIndex(t.Root) {
-		return false, "没有 .codegraph 索引 — 先在仓库里跑 codegraph init"
+		return false, "no .codegraph index — run codegraph init in this repository"
 	}
 	if len(t.GoFiles()) == 0 {
 		return false, "no Go files changed"
@@ -52,7 +52,7 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 		if err := Sync(ctx, t.Root); err != nil {
 			// A stale index still answers most questions; say so rather than
 			// refusing to measure.
-			r.Notes = append(r.Notes, "索引可能不是最新的(codegraph sync 失败)")
+			r.Notes = append(r.Notes, "index may be stale (codegraph sync failed)")
 		}
 	}
 
@@ -75,11 +75,11 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 
 	changed, newCallees, missing := a.changedNodes(ctx, t, g)
 	if len(changed) == 0 {
-		r.Measures = unmeasured("索引里找不到这次改动的符号,可能需要重新索引")
+		r.Measures = unmeasured("the index has none of the changed symbols — it may need rebuilding")
 		return r, nil
 	}
 	if missing > 0 {
-		r.Notes = append(r.Notes, fmt.Sprintf("%d 个变更函数不在索引里", missing))
+		r.Notes = append(r.Notes, fmt.Sprintf("%d changed functions are missing from the index", missing))
 	}
 
 	send(prog, axis.Progress{AxisID: a.ID(), Stage: "rules", Total: len(changed)})
@@ -99,11 +99,11 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 		}
 	}
 	r.Measures = []axis.Measure{
-		count("graph.orphans", "孤立新符号", len(orphans), true),
-		count("graph.duplicates", "重复实现", len(dups), true),
-		count("graph.bypassed", "绕过既定路径", len(bypassed), true),
-		count("graph.layer_crossings", "无先例跨层边", len(crossings), false),
-		count("graph.sibling_divergence", "同侪偏离", len(divergence), false),
+		count("graph.orphans", "orphaned symbols", len(orphans), true),
+		count("graph.duplicates", "duplicated work", len(dups), true),
+		count("graph.bypassed", "bypassed paths", len(bypassed), true),
+		count("graph.layer_crossings", "unprecedented deps", len(crossings), false),
+		count("graph.sibling_divergence", "sibling divergence", len(divergence), false),
 	}
 
 	all := append(append(append(append(orphans, dups...), bypassed...), crossings...), divergence...)
@@ -192,9 +192,9 @@ func (a *Axis) observations(fs []Finding) []axis.Observation {
 
 func unmeasured(why string) []axis.Measure {
 	keys := []struct{ key, label string }{
-		{"graph.orphans", "孤立新符号"},
-		{"graph.duplicates", "重复实现"},
-		{"graph.bypassed", "绕过既定路径"},
+		{"graph.orphans", "orphaned symbols"},
+		{"graph.duplicates", "duplicated work"},
+		{"graph.bypassed", "bypassed paths"},
 	}
 	var out []axis.Measure
 	for _, k := range keys {

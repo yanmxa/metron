@@ -137,22 +137,23 @@ func buildAxes(spec string, budget time.Duration, paranoid, fresh bool) ([]axis.
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `metron — 代码化验单
+	fmt.Fprint(os.Stderr, `metron — a lab report for a code change
 
-对一次改动出三项读数,每项对照参考区间:测试是不是真的承重(变异得分)、
-代码有多难读懂和扩展(认知复杂度)、有没有重复造轮子和偏离既有结构(图)。
+Three readings, each against a reference range: whether the tests actually
+hold the code up (mutation), how hard it is to read and extend (complexity),
+and whether it duplicates or steps around what already exists (graph).
 
-用法:
+Usage:
   metron [flags]
 
 Flags:
 `)
 	flag.PrintDefaults()
 	fmt.Fprint(os.Stderr, `
-退出码:
-  0  全部在区间内
-  1  出错
-  2  有读数超出区间
-  3  预算耗尽,读数不完整
+Exit codes:
+  0  every reading within range
+  1  error
+  2  a reading fell outside its range
+  3  budget spent; the readings cover only a sample
 `)
 }

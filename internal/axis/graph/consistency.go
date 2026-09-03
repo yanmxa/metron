@@ -46,8 +46,8 @@ func BypassedWrappers(g *Graph, changed []Node, nc NewCallees, th Thresholds) []
 			wrapper := w
 			out = append(out, Finding{
 				Rule: "bypassed-wrapper", Node: n, Other: &wrapper,
-				Title: fmt.Sprintf("%s 直接调用了 %s,绕过了 %s", n.Label(), t.Label(), w.Label()),
-				Detail: fmt.Sprintf("%s 有 %d 个调用者,而 %s 的其它直接调用者只有 %d 个 · %s:%d",
+				Title: fmt.Sprintf("%s calls %s directly, stepping around %s", n.Label(), t.Label(), w.Label()),
+				Detail: fmt.Sprintf("%s has %d callers, while %s has only %d other direct ones · %s:%d",
 					w.Label(), len(g.CallersOf(w.ID)), t.Label(),
 					directCallersExcluding(g, target, w.ID, changedIDs), w.File, w.StartLine),
 			})
@@ -177,8 +177,8 @@ func LayerCrossings(g *Graph, changed []Node, nc NewCallees) []Finding {
 			tt := t
 			out = append(out, Finding{
 				Rule: "layer-crossing", Node: n, Other: &tt,
-				Title:  fmt.Sprintf("%s → %s 这个方向仓库里没有先例", n.Dir(), t.Dir()),
-				Detail: fmt.Sprintf("%s 调用了 %s(%s:%d)", n.Label(), t.Label(), t.File, t.StartLine),
+				Title:  fmt.Sprintf("nothing in this repository has ever gone %s → %s", n.Dir(), t.Dir()),
+				Detail: fmt.Sprintf("%s calls %s (%s:%d)", n.Label(), t.Label(), t.File, t.StartLine),
 			})
 		}
 	}
@@ -210,8 +210,8 @@ func SiblingDivergence(g *Graph, changed []Node, minSiblings int, minShare float
 		label string
 		holds func(Node) bool
 	}{
-		{"ctx-first", "首参 context.Context", takesContextFirst},
-		{"returns-error", "返回 error", returnsError},
+		{"ctx-first", "a context.Context first parameter", takesContextFirst},
+		{"returns-error", "returning an error", returnsError},
 	}
 
 	var out []Finding
@@ -244,8 +244,8 @@ func SiblingDivergence(g *Graph, changed []Node, minSiblings int, minShare float
 			}
 			out = append(out, Finding{
 				Rule: "sibling-divergence", Node: n,
-				Title: fmt.Sprintf("%s 没有跟上 %s 里的惯例:%s", n.Label(), n.Dir(), c.label),
-				Detail: fmt.Sprintf("同目录 %d 个函数里 %d 个(%.0f%%)是这么写的",
+				Title: fmt.Sprintf("%s breaks a convention its neighbours in %s follow: %s", n.Label(), n.Dir(), c.label),
+				Detail: fmt.Sprintf("%d of %d functions in that directory do it (%.0f%%)",
 					len(siblings), hold, share*100),
 			})
 		}

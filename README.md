@@ -1,124 +1,180 @@
 # metron
 
-代码化验单。对一次改动出三项读数,每项对照参考区间,超限标记,退出码闸门。
+A lab report for a code change. Three readings, each against a reference range,
+with an exit code you can gate on.
 
-评价 agent 写的代码,现在靠的是「看起来对不对」。行覆盖率会骗人——agent 特别擅长写出
-覆盖率很高、但一个断言都不真正卡住行为的测试。复杂度没人量,于是它一次次往已有函数里
-塞分支而不是抽出来。冗余更没人量,于是它找不到现成的工具函数就自己再写一个。
+Line coverage cannot tell a test suite that checks results from one that merely
+executes code — and agents are very good at writing the second kind. Complexity
+nobody measures drifts upward one branch at a time. The same job gets written
+three ways because nothing counts it. All three are measurable, and what comes
+out is a number rather than an opinion.
 
-这三件事都是可以测的,测出来是个数,不是意见。
+The name is Greek μέτρον, "a measure", the root of *metric* and *metrology*. The
+Delphic maxim μέτρον ἄριστον — "measure is best" — is the argument: agent-written
+code usually runs; what it lacks is measure.
 
-名字取自希腊语 μέτρον「一把尺度」,metric / meter / metrology 都从它来。德尔菲神谕那句
-μέτρον ἄριστον「凡事有度」正是这工具的论点:agent 写的代码不是不能跑,是没有度。
+## The point, in one example
 
 ```
 $ metron --since main --axes all
-
   METRON  main · 1 files · 18+
 
-  指标                               读数   参考区间
-  ─────────────────────────────────────────────────────
-  认知复杂度 max                        3   ≤ 15      ✓    Discount
-  认知复杂度 Δ(既有函数)                0   = 0       ✓
-  孤立新符号                            0   = 0       ✓
-  重复实现                              0   = 0       ✓
-  绕过既定路径                          0   = 0       ✓
-  变异得分                            20%   ≥ 70%     L
-  测试锐度(只看跑到的)                20%   ≥ 80%     L
-  触及率                             100%   ≥ 85%     ✓
-  存活变异体                           12   = 0       H
+  reading                       value   reference
+  ────────────────────────────────────────────────
+  cognitive max                    3   ≤ 15      ✓    Discount
+  cognitive Δ (existing funcs)     0   = 0       ✓
+  funcs over threshold             0   = 0       ✓
+  cognitive max (raw)              3
+  orphaned symbols                 0   = 0       ✓
+  duplicated work                  0   = 0       ✓
+  bypassed paths                   0   = 0       ✓
+  unprecedented deps               0   = 0       ✓
+  sibling divergence               0   = 0       ✓
+  mutation score                 20%   ≥ 70%     L
+  test strength                  20%   ≥ 80%     L
+  reach                         100%   ≥ 85%     ✓
+  surviving mutants               12   = 0       H
+  uncovered mutants                0   = 0       ✓
+  non-viable rate                 0%   ≤ 15%     ✓
 
-  3 项超出区间
+  3 out of range
 
   mutation
-    pricing/pricing.go:9  Discount 改成这样,测试依然全绿(CONDITIONALS_BOUNDARY)
+    pricing/pricing.go:9  no test caught this change to Discount (CONDITION_FORCE)
+      - if total < 0 {
+      + if true {
+    pricing/pricing.go:9  no test caught this change to Discount (CONDITIONALS_BOUNDARY)
       - if total < 0 {
       + if total <= 0 {
-    pricing/pricing.go:12  Discount 改成这样,测试依然全绿(CONDITION_FORCE)
-      - if tier == "gold" {
-      + if false {
+    …
 ```
 
-**这份代码的行覆盖率是 100%。** 变异得分 20 分。这就是为什么覆盖率不能用来判断
-agent 写的测试——它只证明代码被执行过,不证明有人在检查结果。
+**That code has 100% line coverage.** It scores 20. Replace the test with one
+that actually asserts and it scores 100 — at the same 100% coverage.
 
-换一份认真写的测试,同样 100% 行覆盖,变异得分 100 分。两者覆盖率完全一样。
+The decomposition names the problem: reach is 100%, so the tests do execute the
+code; strength is 20%, so they execute it and check nothing.
 
-## 三条轴
+## The three axes
 
-| 轴 | 问的问题 |
+| axis | the question |
 | --- | --- |
-| **mutation** | 测试是不是真的承重 —— 改坏代码,看测试抓不抓得住 |
-| **complexity** | 有多难读懂和扩展 —— 认知复杂度,以及相对改动前的增量 |
-| **graph** | 有没有重复造轮子、偏离既有结构 |
+| **mutation** | Do the tests hold the code up? Break it and see whether anything notices. |
+| **complexity** | How hard is it to read and extend — and how much worse did this change make it? |
+| **graph** | Does it duplicate, orphan, or step around what already exists? |
 
-**不做加权总分。** 单个综合分会把「哪条轴烂了」藏起来,而且必然被 game。
+**There is no composite score.** One weighted number hides which axis failed and
+gets gamed. Each axis reports its own readings against its own ranges.
 
-## 用法
+## Install
+
+```
+go install github.com/yanmxa/metron/cmd/metron@latest
+```
+
+The graph axis reads a [CodeGraph](https://github.com/colbymchenry/codegraph)
+index — run `codegraph init` to enable it. Without one it reports `n/a` and says
+why, rather than quietly passing.
+
+## Usage
 
 ```
 metron [--since ref] [--axes complexity,graph,mutation|all] [--format table|json]
        [--fail-on headline|any|none] [--budget 5m] [--paranoid] [--fresh] [-C dir]
 ```
 
-默认只跑 complexity 和 graph(都是秒级)。mutation 要跑你的测试套件,用 `--axes all`
-或 `--axes mutation` 显式开启。
+`complexity` and `graph` run by default and take about a second. `mutation` runs
+your test suite, so it is opt-in.
 
-**断点续跑是默认的。** 变异结果按内容哈希写进 `.metron/`,一边跑一边落盘,中断了下次接着跑。
-源码或测试只要动过一个字节,整份缓存作废重测——一个过期的判定比没有缓存危险得多。
-参考区间改了不作废(区间决定怎么判读数,不决定读数本身)。`--fresh` 强制重测。
+Exit codes: `0` all within range · `1` error · `2` a reading out of range ·
+`3` budget spent, readings cover only a sample. **A partial run never fails a
+build** — the sample is not the population, and a tool that reports red on
+incomplete evidence teaches people to ignore it.
 
-实测:冷跑 8.3s,全命中缓存 0.26s。
+**Resume is on by default.** Verdicts are content-addressed and flushed to
+`.metron/` as they land, so an interrupted run continues instead of restarting:
+8.3s cold, 0.26s fully cached. Touch one byte of source or test and the whole
+cache is discarded, because a stale verdict is far more dangerous than none.
+Reference ranges are excluded from the key — they change how a reading is judged,
+not what it is. `--fresh` forces a re-measure.
 
-**套件太慢时它拒绝出分。** 如果预算只够评不到四分之一的变异体,这条轴报「未测」并说明原因,
-而不是拿一把采样编一个数出来。化验单上一个空读数是诚实的,一个编造的读数比没有工具更糟。
+**It refuses to score a suite it cannot sample.** If the budget buys under a
+quarter of the mutants, the axis reports `n/a` with the arithmetic instead of a
+number derived from a handful.
 
-退出码:`0` 全在区间内 · `1` 出错 · `2` 有超限 · `3` 预算耗尽读数不完整。
-
-部分结果**不会**让构建失败——采样不是总体,一个在证据不全时就报红的工具会教会大家忽略它。
-
-## 变异得分怎么算的
+## How the mutation score is defined
 
 ```
-                     KILLED + TIMED_OUT
-  变异得分  = ─────────────────────────────────────────────   ← 头条 + 闸门
+                   KILLED + TIMED_OUT
+  score    = ─────────────────────────────────────────    ← headline, and the gate
              KILLED + TIMED_OUT + SURVIVED + NOT_COVERED
 
-  测试锐度  = (KILLED + TIMED_OUT) / (KILLED + TIMED_OUT + SURVIVED)
-  触及率    = 1 − NOT_COVERED / (KILLED + TIMED_OUT + SURVIVED + NOT_COVERED)
+  strength = (KILLED + TIMED_OUT) / (KILLED + TIMED_OUT + SURVIVED)
+  reach    = 1 − NOT_COVERED / (KILLED + TIMED_OUT + SURVIVED + NOT_COVERED)
 ```
 
-**未覆盖的变异体算进分母。** agent 最典型的失败形态是写 200 行、把其中 20 行测得很好。
-只看锐度的话这种改动拿满分,而且可以直接刷——给一个小函数写一个漂亮测试就行。锐度回答
-「你写的测试够不够狠」,而要问的是「这次改动是不是被测试撑住了」。
+**Uncovered mutants count against you.** The dominant failure in agent-written
+code is 200 new lines with 20 tested well. Excluding them scores that
+near-perfect, and it is gamed by writing one excellent test for one tiny
+function. Strength asks "are the tests you wrote good tests"; the score asks "is
+this change held up by tests". Only the second is worth gating on.
 
-**编译不过的变异体不算进分母。** 那是 metron 自己生成器的产物,不是你的测试的属性。
-单独报成生成器健康度诊断。
+**Non-viable mutants do not.** A mutant that fails to compile is an artifact of
+metron's generator, not a property of your tests — counting it would penalise a
+file for containing string concatenation. It is reported separately.
 
-锐度和触及率把头条拆开,告诉你落在哪种失败形态:**触及率低 = 压根没测;锐度低 = 跑到了
-但什么都没断言。**
+A timeout counts as detected. Mutants are generated only inside the function
+bodies the change touched, so a run takes tens of seconds rather than scanning
+the repository.
 
-变异只在**改动覆盖到的函数体内**生成,默认不是全仓扫描——一次改动几十秒出分。
+## How cognitive complexity is defined
 
-实现细节和实测数据(overlay 不打穿构建缓存、`-vet=off` 为什么是正确性要求、并发为什么
-必须先隔离抖动测试)见 [docs/mutation-design.md](docs/mutation-design.md)。
+Computed natively over `go/ast`, following the SonarSource specification.
+Cross-checked against [gocognit](https://github.com/uudashr/gocognit) over all
+528 functions in `spf13/cobra`: **523 agree exactly**. The five that differ are
+one deliberate divergence — the specification raises the nesting level inside an
+`else` body and gocognit does not. Code inside an `else` really is one level
+deeper for the reader.
 
-## 认知复杂度怎么算的
+**Go's error guards are scored twice, on purpose.** The canonical
+`if err != nil { return err }` is 7.7% of every branch keyword in the Go standard
+library and higher in application code. A Go reader parses it as one token, not a
+branch; counting it in full makes every Go function look complex and the metric
+stops discriminating. So the raw score stays comparable with gocognit, and the
+reference range is set against the adjusted one. Only guards that purely bail out
+are discounted — anything with an `else`, or that handles the error, is a real
+branch.
 
-按 SonarSource 规范,`go/ast` 原生实现,不 shell out。在 spf13/cobra 全部 528 个函数上和
-gocognit 对过:**523 个完全一致**。5 个分歧是同一处刻意为之——规范规定 `else` 体要抬高
-嵌套层级,gocognit 没抬。else 里的代码对读者确实深一层,这里跟规范。
+**Δ is the reading that matters most.** It targets the habit of piling branches
+into a function that already exists instead of extracting a new one. In the demo
+above the absolute value sat inside its range; only Δ caught the change.
 
-**Go 的 err 卫语句单独处理。** 实测 Go 标准库里 canonical `if err != nil {` 占全部分支
-关键字的 7.7%,应用代码里更高。这类卫语句对 Go 读者是一个 token 的认知负担,不是一次真正
-的分支;全额计入会让每个 Go 函数都显得复杂,指标就废了。所以**两个数都算**:原始值保持
-与 gocognit / SonarSource 可比,参考区间设在折抵后的值上。
+## Calibration
 
-只有「只是 bail out」的才折抵——带 `else` 的、或者真做了错误处理的,是真分支,全额计入。
+The graph rules were tightened against a standard: six no-op edits to `cobra` —
+one comment line added to an untouched function — must produce zero findings.
+Reaching zero took three fixes, each from a real misfire:
 
-## 开发
+- Go passes functions as values constantly (`return defaultUsageFunc`) and the
+  index records no call edge for it, so orphan detection cross-checks real
+  identifier use.
+- A wrapper is not merely a popular caller. Its target has to be *funnelled* —
+  almost nothing else calls it directly.
+- Only edges the change actually **introduced** count. Without comparing against
+  the merge base, every call a merely-touched function has always made is
+  reported.
+
+The mutation axis has three traps that all fail toward a *passing* grade, so each
+has a regression test: a build failure is shaped exactly like a test failure in
+the JSON stream; vet runs by default and a vet failure looks like a build
+failure; and concurrency wakes flaky tests that then read as kills.
+
+[docs/mutation-design.md](docs/mutation-design.md) has the measurements behind
+every one of these decisions.
+
+## Development
 
 ```
 go test ./...
-go run ./cmd/metron --since HEAD~1
+go run ./cmd/metron --since HEAD~1 --axes all
 ```

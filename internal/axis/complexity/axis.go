@@ -176,7 +176,7 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 	r := &axis.Result{AxisID: "complexity"}
 	if len(scores) == 0 {
 		r.Measures = []axis.Measure{{
-			Key: "complexity.cognitive_max", Label: "认知复杂度 max",
+			Key: "complexity.cognitive_max", Label: "cognitive max",
 			Status: axis.StatusUnmeasured, Headline: true,
 			Note: "no non-test Go functions changed",
 		}}
@@ -206,7 +206,7 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 
 	r.Measures = []axis.Measure{
 		{
-			Key: "complexity.cognitive_max", Label: "认知复杂度 max",
+			Key: "complexity.cognitive_max", Label: "cognitive max",
 			Value: float64(maxCog), Unit: axis.UnitCount,
 			RefHigh: &hiCog, Headline: true,
 			Status: statusFor(float64(maxCog) <= hiCog),
@@ -217,19 +217,19 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 		{
 			// The reading this axis exists for: agents pile branches into an
 			// existing function instead of extracting a new one.
-			Key: "complexity.delta_max", Label: "认知复杂度 Δ(既有函数)",
+			Key: "complexity.delta_max", Label: "cognitive \u0394 (existing funcs)",
 			Value: float64(maxDelta), Unit: axis.UnitDelta,
 			RefHigh: &hiDelta, Headline: true,
 			Status: statusFor(float64(maxDelta) <= hiDelta),
 			Note:   deltaAt,
 		},
 		{
-			Key: "complexity.over_threshold", Label: "超阈值函数",
+			Key: "complexity.over_threshold", Label: "funcs over threshold",
 			Value: float64(over), Unit: axis.UnitCount,
 			RefHigh: &zero, Status: statusFor(over == 0),
 		},
 		{
-			Key: "complexity.cognitive_raw_max", Label: "认知复杂度 max(未折抵 err 卫语句)",
+			Key: "complexity.cognitive_raw_max", Label: "cognitive max (raw)",
 			Value: float64(maxRaw), Unit: axis.UnitCount,
 			Status: axis.StatusOK,
 		},
@@ -260,15 +260,15 @@ func (a *Axis) observations(scores []FuncScore) []axis.Observation {
 
 	out := make([]axis.Observation, 0, len(interesting))
 	for _, s := range interesting {
-		detail := fmt.Sprintf("认知复杂度 %d(原始 %d,折抵 %d 处 err 卫语句)· 圈复杂度 %d · %d 行 · 扇出 %d",
+		detail := fmt.Sprintf("cognitive %d (raw %d, %d err guards discounted) \u00b7 cyclomatic %d \u00b7 %d lines \u00b7 fan-out %d",
 			s.Score.Adjusted, s.Score.Cognitive, s.Score.ErrGuards,
 			s.Score.Cyclomatic, s.Score.Lines, s.Score.FanOut)
 		title := s.Fn.Label()
 		switch {
 		case s.IsNew:
-			title += "(新函数)"
+			title += " (new)"
 		case s.Delta > 0:
-			title += fmt.Sprintf("(Δ +%d,改动前 %d)", s.Delta, s.Base.Adjusted)
+			title += fmt.Sprintf(" (\u0394 +%d, was %d)", s.Delta, s.Base.Adjusted)
 		}
 		out = append(out, axis.Observation{
 			Path: s.Fn.Path, Line: s.Fn.StartLine, EndLine: s.Fn.EndLine,
