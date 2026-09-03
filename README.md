@@ -7,10 +7,10 @@ English · [简体中文](README.zh.md)
 [![go report card](https://goreportcard.com/badge/github.com/yanmxa/metron)](https://goreportcard.com/report/github.com/yanmxa/metron)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Most of our code is written by an AI now. Test-driven development is how we keep
-that honest: say what the code must do, then make it do it.
+A large share of code is now written by an AI. Test-driven development is the
+usual way to keep that honest: say what the code must do, then make it do it.
 
-Except TDD assumes something it cannot check — that the tests you got are worth
+But TDD assumes something it cannot check — that the tests it produced are worth
 having. Three things go wrong, and none of them show up in a diff.
 
 ---
@@ -151,8 +151,8 @@ CRAP(f) = cyclomatic(f)² × (1 − tested(f))³ + cyclomatic(f)
 ```
 
 Crap4j's original uses line coverage for `tested`. metron uses that function's
-**mutation score** instead — because we just established that coverage is the
-number you cannot trust.
+**mutation score** instead — because coverage is the number the first section
+established cannot be trusted.
 
 ```
   cognitive max       6   ≤ 15      ✓          ← complexity says this is fine
@@ -170,10 +170,10 @@ where to look first.*
 
 ## 3. Does it fit what is already there?
 
-The failure that surprised me most is not incorrect code. It is code that is
-perfectly correct and should not exist — a helper rewritten because the agent
-could not find the one that was already there, a wrapper stepped around, a
-dependency drawn in a direction nothing else in the repository draws.
+The hardest failure to see is not incorrect code. It is code that is perfectly
+correct and should not exist — a helper rewritten because the agent could not
+find the one already there, a wrapper stepped around, a dependency drawn in a
+direction nothing else in the repository draws.
 
 No amount of testing catches this. The code works. It is the *shape* of the
 repository that got worse, and you cannot see shape from inside one diff.

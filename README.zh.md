@@ -7,8 +7,8 @@
 [![go report card](https://goreportcard.com/badge/github.com/yanmxa/metron)](https://goreportcard.com/report/github.com/yanmxa/metron)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-现在我们的代码有很大一部分是 AI 写的。为了让它规矩一点,我们用测试驱动开发:先说清楚
-代码该做什么,再让它做到。
+如今相当一部分代码是 AI 写的。测试驱动开发是约束它的常用手段:先说清楚代码该做什么,
+再让它做到。
 
 但 TDD 有一个它自己检查不了的前提——**你拿到的那些测试,到底值不值得拥有**。有三件事会
 出问题,而且在 diff 里一件都看不出来。
@@ -142,7 +142,7 @@ CRAP(f) = cyclomatic(f)² × (1 − tested(f))³ + cyclomatic(f)
 ```
 
 Crap4j 原版的 `tested` 用的是**行覆盖率**。metron 换成了这个函数自己的**变异得分**——
-因为我们刚刚才确认过,覆盖率正是那个不能信的数。
+因为第一节已经确认过,覆盖率正是那个不能信的数。
 
 ```
   cognitive max       6   ≤ 15      ✓          ← 复杂度说这个函数没问题
@@ -159,7 +159,7 @@ Crap4j 原版的 `tested` 用的是**行覆盖率**。metron 换成了这个函�
 
 ## 三、它和已经有的东西合得上吗?
 
-最让我意外的失败形态不是「写错了」,而是**写得完全正确、但根本不该存在**的代码——
+最难被发现的失败形态不是「写错了」,而是**写得完全正确、但根本不该存在**的代码——
 一个因为找不到现成的所以重写了一遍的工具函数、一个被绕过去的包装器、一条这个仓库里
 从来没人画过的依赖方向。
 
