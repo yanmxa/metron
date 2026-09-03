@@ -1,9 +1,12 @@
-// Package crap computes Change Risk Anti-Patterns and uses it to order what the
-// complexity axis reports.
+// Package crap computes Change Risk Analysis and Predictions and uses it to
+// order what the complexity axis reports.
 //
-// CRAP was defined by Alberto Savoia and Bob Evans for Crap4j: complexity is
-// forgiven when the code is tested and punished hard when it is not. A function
-// with cyclomatic complexity 10 scores 10 when fully covered and 110 when not.
+// CRAP was defined by Alberto Savoia in 2007 and implemented in Crap4j:
+// complexity is forgiven when the code is tested and punished hard when it is
+// not. A function with cyclomatic complexity 10 scores 10 when fully covered
+// and 110 when not.
+//
+//	https://www.artima.com/weblogs/viewpost.jsp?thread=210575
 //
 // metron departs from the original in one place, and it matters. Crap4j feeds
 // on line coverage — the very number this tool exists to distrust. A function

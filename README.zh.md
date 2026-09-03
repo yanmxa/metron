@@ -138,7 +138,8 @@ metron 自己的问题,不是你的,单独报。
 CRAP(f) = cyclomatic(f)² × (1 − mutationScore(f))³ + cyclomatic(f)
 ```
 
-Change Risk Anti-Patterns,出自 Crap4j。复杂度在被测住时可以被原谅,没测住时就重罚:
+[Change Risk Analysis and Predictions](https://www.artima.com/weblogs/viewpost.jsp?thread=210575),Alberto Savoia
+2007 年提出,由 Crap4j 实现。复杂度在被测住时可以被原谅,没测住时就重罚:
 圈复杂度 10 的函数,全测住是 10 分,完全没测是 110 分。惯例的红线是 30。
 
 metron 在一个地方和原版不同,而且是关键的那个地方。Crap4j 吃的是**行覆盖率**——正是这个

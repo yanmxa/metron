@@ -151,8 +151,8 @@ and invites gaming.
 CRAP(f) = cyclomatic(f)² × (1 − mutationScore(f))³ + cyclomatic(f)
 ```
 
-[Change Risk Anti-Patterns](https://en.wikipedia.org/wiki/Cyclomatic_complexity),
-from Crap4j. Complexity is forgiven when the code is pinned and punished hard when
+[Change Risk Analysis and Predictions](https://www.artima.com/weblogs/viewpost.jsp?thread=210575), defined by
+Alberto Savoia in 2007 and implemented in Crap4j. Complexity is forgiven when the code is pinned and punished hard when
 it is not: cyclomatic 10 scores 10 fully tested, 110 untested. Over 30 is the
 conventional limit.
 
