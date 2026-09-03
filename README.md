@@ -25,7 +25,7 @@ to put in a loop, and safe to gate on.
 ## The loop
 
 An agent has just written `Discount` and a test for it. The test covers **100% of
-statements**.
+statements**. (Output trimmed to the readings that moved.)
 
 ```
 $ metron --since main --axes all

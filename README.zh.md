@@ -20,7 +20,7 @@ metron 把它们量出来,然后说该怎么办——用 agent 能照着做、�
 
 ## 这个循环
 
-agent 刚写完 `Discount` 和它的测试。测试的**行覆盖率是 100%**。
+agent 刚写完 `Discount` 和它的测试。测试的**行覆盖率是 100%**。(输出只截取了变动的读数。)
 
 ```
 $ metron --since main --axes all

@@ -52,6 +52,9 @@ func run() error {
 		fmt.Println(versionString())
 		return nil
 	}
+	if flag.Arg(0) == "init" {
+		return initConfig(ctxFor(), *dir)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -206,6 +209,57 @@ func buildAxes(spec string, cfg *config.File, budget time.Duration,
 	return out, nil
 }
 
+// initConfig writes a starter metron.json calibrated to this repository.
+//
+// It measures first. A config full of aspirational numbers fails on the first
+// run with nothing to blame, and the tool gets switched off before it has said
+// anything useful.
+func initConfig(ctx context.Context, dir string) error {
+	t, err := target.ResolveAll(ctx, dir)
+	if err != nil {
+		return err
+	}
+
+	res, err := complexity.New(complexity.DefaultConfig()).Run(ctx, t, nil)
+	if err != nil {
+		return err
+	}
+	worst := 0
+	for _, m := range res.Measures {
+		if m.Key == "complexity.cognitive_max" && m.Status != axis.StatusUnmeasured {
+			worst = int(m.Value)
+		}
+	}
+
+	path, err := config.Write(t.Root, config.Starter(worst, hasTests(t)))
+	if err != nil {
+		return err
+	}
+
+	limit := config.Ratchet(worst)
+	fmt.Printf("wrote %s\n\n", path)
+	fmt.Printf("  %d Go files · worst function scores %d\n", len(t.Files), worst)
+	if limit > worst {
+		fmt.Printf("  complexity limit %d — the default, which this repository is already inside\n", limit)
+	} else {
+		fmt.Printf("  complexity limit %d — today's worst, so the first run passes\n", limit)
+	}
+	fmt.Printf("  delta 0 — none of it may grow\n\n")
+	fmt.Printf("Next: metron --since main --axes all\n")
+	return nil
+}
+
+func hasTests(t *target.Target) bool {
+	for _, f := range t.Files {
+		if target.IsTestFile(f.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func ctxFor() context.Context { return context.Background() }
+
 // versionString prefers the version stamped by a release build, then whatever
 // `go install` recorded, so it is never simply "unknown" in the common cases.
 func versionString() string {
@@ -238,6 +292,7 @@ finding carries the change that closes it.
 
 Usage:
   metron [flags]
+  metron init          write a metron.json calibrated to this repository
 
 Examples:
   metron --since main                    measure a change, fast axes only

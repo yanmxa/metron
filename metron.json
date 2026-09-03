@@ -10,7 +10,7 @@
   // code is ratcheting; raising it to let a function get worse is surrender,
   // and a delta of zero forbids the second.
   "complexity": {
-    "maxCognitive": 30,
+    "maxCognitive": 29,
     "maxDelta": 0
   },
 

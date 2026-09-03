@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -105,5 +106,47 @@ func TestBudgetFallsBackWhenUnset(t *testing.T) {
 	f, _, _ := Load(t.TempDir())
 	if got := f.MutationBudget(3 * time.Minute); got != 3*time.Minute {
 		t.Errorf("budget = %v, want the fallback", got)
+	}
+}
+
+func TestStarterMeetsTheRepositoryWhereItIs(t *testing.T) {
+	// A tool that fails on the first run, with no change to blame, gets
+	// switched off. The starting limit is today's worst function.
+	body := Starter(34, true)
+
+	f, _, err := Load(write(t, body))
+	if err != nil {
+		t.Fatalf("generated config does not parse: %v\n%s", err, body)
+	}
+	if f.Complexity == nil || *f.Complexity.MaxCognitive != 34 {
+		t.Errorf("maxCognitive = %v, want today's worst", f.Complexity)
+	}
+	if *f.Complexity.MaxDelta != 0 {
+		t.Error("maxDelta must start at 0 — that is what makes the raised limit a ratchet")
+	}
+	if !strings.Contains(body, "ratchet") {
+		t.Error("the file should record why the number is what it is")
+	}
+}
+
+func TestStarterNeverRaisesAnAlreadyGoodLimit(t *testing.T) {
+	// A tidy repository should not have the default quietly loosened for it.
+	body := Starter(4, false)
+	f, _, err := Load(write(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *f.Complexity.MaxCognitive != 15 {
+		t.Errorf("maxCognitive = %d, want the default 15", *f.Complexity.MaxCognitive)
+	}
+	if f.Mutation != nil {
+		t.Error("a repository with no tests should not be given a mutation range")
+	}
+}
+
+func TestWriteRefusesToClobber(t *testing.T) {
+	dir := write(t, `{}`)
+	if _, err := Write(dir, "{}"); err == nil {
+		t.Error("an existing config must not be overwritten")
 	}
 }
