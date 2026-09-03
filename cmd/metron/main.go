@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/yanmxa/metron/internal/axis/complexity"
 	"github.com/yanmxa/metron/internal/axis/graph"
 	"github.com/yanmxa/metron/internal/axis/mutation"
+	"github.com/yanmxa/metron/internal/config"
 	"github.com/yanmxa/metron/internal/crap"
 	"github.com/yanmxa/metron/internal/gate"
 	"github.com/yanmxa/metron/internal/panel"
@@ -39,10 +41,17 @@ func run() error {
 		budget   = flag.Duration("budget", 5*time.Minute, "wall-clock budget for the mutation axis")
 		paranoid = flag.Bool("paranoid", false, "re-run every killed mutant sequentially before believing it")
 		fresh    = flag.Bool("fresh", false, "ignore any checkpoint and re-measure from scratch")
+		showVer  = flag.Bool("version", false, "print the version and exit")
+		quiet    = flag.Bool("quiet", false, "suppress progress output")
 		all      = flag.Bool("all", false, "measure the whole repository instead of one change; readings that need a base revision report as unmeasured")
 	)
 	flag.Usage = usage
 	flag.Parse()
+
+	if *showVer {
+		fmt.Println(versionString())
+		return nil
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -58,10 +67,21 @@ func run() error {
 		return err
 	}
 
-	axes, aerr := buildAxes(*axesFlag, *budget, *paranoid, *fresh)
+	cfg, cfgPath, cerr := config.Load(t.Root)
+	if cerr != nil {
+		return cerr
+	}
+	axes, aerr := buildAxes(*axesFlag, cfg, *budget, *paranoid, *fresh)
 	if aerr != nil {
 		return aerr
 	}
+
+	// A mutation run can take minutes. Reporting nothing while it works is
+	// indistinguishable from being hung, which is the usual reason a tool gets
+	// killed just before it would have succeeded. Progress goes to stderr so
+	// --format json stays pipeable.
+	showProgress := !*quiet && *format == "table" && isTerminal(os.Stderr)
+	prog := panel.NewProgress(os.Stderr, showProgress)
 
 	var results []*axis.Result
 	for _, a := range axes {
@@ -76,7 +96,13 @@ func run() error {
 			})
 			continue
 		}
-		r, err := a.Run(ctx, t, nil)
+		ch := make(chan axis.Progress, 64)
+		done := make(chan struct{})
+		go func() { prog.Watch(ch); close(done) }()
+		r, err := a.Run(ctx, t, ch)
+		close(ch)
+		<-done
+		prog.Clear()
 		if err != nil {
 			return fmt.Errorf("%s axis: %w", a.ID(), err)
 		}
@@ -100,7 +126,7 @@ func run() error {
 			return err
 		}
 	case "table":
-		p := &panel.Panel{Target: t, Results: results}
+		p := &panel.Panel{Target: t, Results: results, ConfigPath: cfgPath}
 		fmt.Print(p.Render())
 	default:
 		return fmt.Errorf("unknown format %q", *format)
@@ -110,9 +136,25 @@ func run() error {
 	return nil
 }
 
+// setInt applies a configured override only when the file actually stated one,
+// so an absent field keeps the current default rather than freezing whatever it
+// happened to be when the config was written.
+func setInt(dst *int, v *int) {
+	if v != nil {
+		*dst = *v
+	}
+}
+
+func setFloat(dst *float64, v *float64) {
+	if v != nil {
+		*dst = *v
+	}
+}
+
 // buildAxes assembles the requested axes in a fixed order, cheapest first, so
 // a run that is interrupted has still produced the readings that were free.
-func buildAxes(spec string, budget time.Duration, paranoid, fresh bool) ([]axis.Axis, error) {
+func buildAxes(spec string, cfg *config.File, budget time.Duration,
+	paranoid, fresh bool) ([]axis.Axis, error) {
 	want := map[string]bool{}
 	for _, name := range strings.Split(spec, ",") {
 		name = strings.TrimSpace(name)
@@ -130,17 +172,33 @@ func buildAxes(spec string, budget time.Duration, paranoid, fresh bool) ([]axis.
 
 	var out []axis.Axis
 	if all || want["complexity"] {
-		out = append(out, complexity.New(complexity.DefaultConfig()))
+		c := complexity.DefaultConfig()
+		if s := cfg.Complexity; s != nil {
+			setInt(&c.MaxCognitive, s.MaxCognitive)
+			setInt(&c.MaxDelta, s.MaxDelta)
+		}
+		out = append(out, complexity.New(c))
 	}
 	if all || want["graph"] {
-		out = append(out, graph.New(graph.DefaultConfig()))
+		g := graph.DefaultConfig()
+		if s := cfg.Graph; s != nil {
+			setInt(&g.MinSiblings, s.MinSiblings)
+		}
+		out = append(out, graph.New(g))
 	}
 	if all || want["mutation"] {
-		cfg := mutation.DefaultConfig()
-		cfg.Budget = budget
-		cfg.Paranoid = paranoid
-		cfg.Fresh = fresh
-		out = append(out, mutation.New(cfg))
+		m := mutation.DefaultConfig()
+		m.Budget = cfg.MutationBudget(budget)
+		m.Paranoid = paranoid
+		m.Fresh = fresh
+		if s := cfg.Mutation; s != nil {
+			setFloat(&m.RefScore, s.MinScore)
+			setFloat(&m.RefStrength, s.MinStrength)
+			setFloat(&m.RefReach, s.MinReach)
+			setInt(&m.Workers, s.Workers)
+			setInt(&m.MaxMutants, s.MaxMutants)
+		}
+		out = append(out, mutation.New(m))
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no axes selected")
@@ -148,15 +206,44 @@ func buildAxes(spec string, budget time.Duration, paranoid, fresh bool) ([]axis.
 	return out, nil
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, `metron — a lab report for a code change
+// versionString prefers the version stamped by a release build, then whatever
+// `go install` recorded, so it is never simply "unknown" in the common cases.
+func versionString() string {
+	if version != "" {
+		return "metron " + version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return "metron " + info.Main.Version
+	}
+	return "metron (devel)"
+}
 
-Three readings, each against a reference range: whether the tests actually
+// version is set at release time with -ldflags "-X main.version=vX.Y.Z".
+var version string
+
+// isTerminal reports whether f is attached to a terminal, so redraws never end
+// up in a CI log or a pipe.
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+func usage() {
+	fmt.Fprint(os.Stderr, `metron — measure code, then say what to do about it
+
+Seven readings against explicit reference ranges: whether the tests actually
 hold the code up (mutation), how hard it is to read and extend (complexity),
-and whether it duplicates or steps around what already exists (graph).
+and whether it duplicates or steps around what already exists (graph). Every
+finding carries the change that closes it.
 
 Usage:
   metron [flags]
+
+Examples:
+  metron --since main                    measure a change, fast axes only
+  metron --since main --axes all         add mutation; runs your test suite
+  metron --all --axes complexity,graph   measure the whole repository
+  metron --since main --format json      machine-readable, for an agent loop
 
 Flags:
 `)

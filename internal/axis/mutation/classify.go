@@ -53,77 +53,16 @@ type Verdict struct {
 // A timeout has its own signature: a test starts and never reaches a terminal
 // event, and the package failure carries no FailedBuild.
 func Classify(events []Event, runErr error) Verdict {
-	var (
-		buildFail   bool
-		buildOutput []string
-		pkgFailed   bool
-		pkgPassed   bool
-		timeout     bool
-		timeoutMsg  string
-		failedTests = map[string]bool{}
-		started     = map[string]bool{}
-		finished    = map[string]bool{}
-	)
-
-	for _, e := range events {
-		switch e.Action {
-		case "build-fail":
-			buildFail = true
-		case "build-output":
-			if s := strings.TrimSpace(e.Output); s != "" {
-				buildOutput = append(buildOutput, s)
-			}
-		case "run":
-			if e.Test != "" {
-				started[e.Test] = true
-			}
-		case "pass":
-			if e.Test == "" {
-				pkgPassed = true
-			} else {
-				finished[e.Test] = true
-			}
-		case "skip":
-			if e.Test != "" {
-				finished[e.Test] = true
-			}
-		case "fail":
-			if e.Test == "" {
-				pkgFailed = true
-				if e.FailedBuild != "" {
-					buildFail = true
-				}
-			} else {
-				finished[e.Test] = true
-				failedTests[e.Test] = true
-			}
-		case "output":
-			if strings.Contains(e.Output, "test timed out after") ||
-				strings.Contains(e.Output, "*** Test killed") {
-				timeout = true
-				timeoutMsg = strings.TrimSpace(e.Output)
-			}
-		}
-	}
-
-	// A test that started and never finished means the binary was killed
-	// mid-run — the other face of a timeout.
-	dangling := false
-	for name := range started {
-		if !finished[name] {
-			dangling = true
-			break
-		}
-	}
+	st := scan(events)
 
 	switch {
-	case buildFail:
-		return Verdict{Outcome: NotViable, Detail: firstLine(buildOutput)}
-	case timeout || (pkgFailed && dangling):
-		return Verdict{Outcome: TimedOut, Detail: timeoutMsg}
-	case pkgFailed:
-		return Verdict{Outcome: Killed, KilledBy: sortedKeys(failedTests)}
-	case pkgPassed:
+	case st.buildFailed:
+		return Verdict{Outcome: NotViable, Detail: firstLine(st.buildOutput)}
+	case st.timedOut || (st.pkgFailed && st.hasDanglingTest()):
+		return Verdict{Outcome: TimedOut, Detail: st.timeoutMsg}
+	case st.pkgFailed:
+		return Verdict{Outcome: Killed, KilledBy: sortedKeys(st.failedTests)}
+	case st.pkgPassed:
 		return Verdict{Outcome: Survived}
 	case runErr != nil:
 		// Non-JSON noise on stderr, a missing toolchain, a killed process:
@@ -131,6 +70,99 @@ func Classify(events []Event, runErr error) Verdict {
 		return Verdict{Outcome: Errored, Detail: runErr.Error()}
 	default:
 		return Verdict{Outcome: Errored, Detail: "no terminal event in the test output"}
+	}
+}
+
+// state is what one run's event stream amounts to.
+type state struct {
+	buildFailed bool
+	buildOutput []string
+	pkgFailed   bool
+	pkgPassed   bool
+	timedOut    bool
+	timeoutMsg  string
+	failedTests map[string]bool
+	started     map[string]bool
+	finished    map[string]bool
+}
+
+// hasDanglingTest reports a test that began and never reached a terminal event,
+// which is what a binary killed mid-run leaves behind.
+func (s *state) hasDanglingTest() bool {
+	for name := range s.started {
+		if !s.finished[name] {
+			return true
+		}
+	}
+	return false
+}
+
+func scan(events []Event) *state {
+	st := &state{
+		failedTests: map[string]bool{},
+		started:     map[string]bool{},
+		finished:    map[string]bool{},
+	}
+	for _, e := range events {
+		st.apply(e)
+	}
+	return st
+}
+
+func (s *state) apply(e Event) {
+	switch e.Action {
+	case "build-fail":
+		s.buildFailed = true
+	case "build-output":
+		if t := strings.TrimSpace(e.Output); t != "" {
+			s.buildOutput = append(s.buildOutput, t)
+		}
+	case "run":
+		s.mark(e, s.started)
+	case "pass":
+		s.terminal(e, &s.pkgPassed)
+	case "skip":
+		s.mark(e, s.finished)
+	case "fail":
+		s.fail(e)
+	case "output":
+		s.maybeTimeout(e)
+	}
+}
+
+func (s *state) mark(e Event, set map[string]bool) {
+	if e.Test != "" {
+		set[e.Test] = true
+	}
+}
+
+// terminal records a package-level outcome, or finishes one test.
+func (s *state) terminal(e Event, pkgFlag *bool) {
+	if e.Test == "" {
+		*pkgFlag = true
+		return
+	}
+	s.finished[e.Test] = true
+}
+
+func (s *state) fail(e Event) {
+	s.terminal(e, &s.pkgFailed)
+	if e.Test == "" {
+		// A build failure exits 1 and emits a package-level fail identical to a
+		// real test failure. FailedBuild is what tells them apart.
+		if e.FailedBuild != "" {
+			s.buildFailed = true
+		}
+		return
+	}
+	s.failedTests[e.Test] = true
+}
+
+func (s *state) maybeTimeout(e Event) {
+	if strings.Contains(e.Output, "test timed out after") ||
+		strings.Contains(e.Output, "*** Test killed") {
+		s.timedOut = true
+		s.timeoutMsg = strings.TrimSpace(e.Output)
 	}
 }
 

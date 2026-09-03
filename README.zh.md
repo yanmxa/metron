@@ -2,6 +2,11 @@
 
 [English](README.md) · 简体中文
 
+[![ci](https://github.com/yanmxa/metron/actions/workflows/ci.yml/badge.svg)](https://github.com/yanmxa/metron/actions/workflows/ci.yml)
+[![go reference](https://pkg.go.dev/badge/github.com/yanmxa/metron.svg)](https://pkg.go.dev/github.com/yanmxa/metron)
+[![go report card](https://goreportcard.com/badge/github.com/yanmxa/metron)](https://goreportcard.com/report/github.com/yanmxa/metron)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **用明确的指标衡量 AI 刚写出来的代码,并把每一处缺口变成一条它能照着做的指令。**
 
 agent 写出来的代码能过评审,但撑不住。它写的测试跑遍每一行、什么都不断言;它往已有函数里
@@ -74,6 +79,21 @@ metron --since main --axes all --format json
 ```
 
 最后那句很重要。**闸门只有在 agent 挪不动它的时候才有意义。**
+
+## 和其它工具比
+
+| | metron | gocyclo / gocognit | go test -cover | gremlins |
+| --- | --- | --- | --- | --- |
+| 复杂度 | ✅ 认知复杂度**和**相对 base 的增量 | ✅ 只有绝对值 | — | — |
+| 测试撑不撑得住 | ✅ 变异测试,按 diff 收敛 | — | ⚠️ 只有覆盖率 | ✅ 全仓 |
+| 死代码 / 重复代码 | ✅ | — | — | — |
+| 告诉你该写什么 | ✅ 每条发现都带 | — | — | — |
+| 可断点续跑、有缓存 | ✅ | n/a | n/a | — |
+| 一个闸门管全部 | ✅ | — | — | — |
+
+最接近 metron 的做法是分别跑 gocognit、覆盖率和 gremlins,然后读三份报告。区别在于这些读数
+是**合起来**的——CRAP 之所以存在,正是因为复杂度和变异得分被一起测量——而且每条发现都带着
+能把它关掉的那个改动。
 
 ## 分析现有代码
 

@@ -2,6 +2,11 @@
 
 English · [简体中文](README.zh.md)
 
+[![ci](https://github.com/yanmxa/metron/actions/workflows/ci.yml/badge.svg)](https://github.com/yanmxa/metron/actions/workflows/ci.yml)
+[![go reference](https://pkg.go.dev/badge/github.com/yanmxa/metron.svg)](https://pkg.go.dev/github.com/yanmxa/metron)
+[![go report card](https://goreportcard.com/badge/github.com/yanmxa/metron)](https://goreportcard.com/report/github.com/yanmxa/metron)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Measures what an AI agent just wrote, against explicit metrics, and hands it
 back a concrete instruction for every gap it finds.**
 
@@ -83,6 +88,22 @@ Stop when the exit code is 0. Never edit metron's thresholds to make it pass.
 
 That last sentence matters. The gate is only worth having if the agent cannot
 move it.
+
+## How it compares
+
+| | metron | gocyclo / gocognit | go test -cover | gremlins |
+| --- | --- | --- | --- | --- |
+| complexity | ✅ cognitive **and** delta vs base | ✅ absolute only | — | — |
+| does the test suite hold up | ✅ mutation, diff-scoped | — | ⚠️ coverage only | ✅ whole repo |
+| dead / duplicated code | ✅ | — | — | — |
+| tells you what to write | ✅ per finding | — | — | — |
+| resumable, cached | ✅ | n/a | n/a | — |
+| one gate for all of it | ✅ | — | — | — |
+
+The nearest thing to metron is running gocognit, coverage and gremlins
+separately and reading three reports. The difference is that the readings are
+combined — CRAP only exists because complexity and mutation are measured
+together — and that every finding carries the change that closes it.
 
 ## Analysing existing code
 

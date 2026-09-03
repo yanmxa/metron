@@ -14,10 +14,7 @@ import (
 // it is where the retry, the locking, the auth check lives — and new code
 // calling T directly has stepped around it.
 func BypassedWrappers(g *Graph, changed []Node, nc NewCallees, th Thresholds) []Finding {
-	changedIDs := map[string]bool{}
-	for _, n := range changed {
-		changedIDs[n.ID] = true
-	}
+	changedIDs := idSet(changed)
 
 	var out []Finding
 	seen := map[string]bool{}
@@ -119,6 +116,28 @@ func directCallersExcluding(g *Graph, target, wrapper string, changed map[string
 	return n
 }
 
+// precedentEdges counts the directory-to-directory dependencies the repository
+// already had, excluding anything the change touched so it cannot vouch for
+// itself.
+func precedentEdges(g *Graph, changed map[string]bool) map[string]int {
+	out := map[string]int{}
+	for _, e := range g.Edges {
+		if e.Kind != "calls" && e.Kind != "instantiates" {
+			continue
+		}
+		if changed[e.Source] {
+			continue
+		}
+		src, sok := g.Nodes[e.Source]
+		dst, dok := g.Nodes[e.Target]
+		if !sok || !dok || isTestFile(src.File) || src.Dir() == dst.Dir() {
+			continue
+		}
+		out[src.Dir()+"->"+dst.Dir()]++
+	}
+	return out
+}
+
 // LayerCrossings finds dependencies in a direction the repository has never
 // taken before.
 //
@@ -131,30 +150,9 @@ func directCallersExcluding(g *Graph, target, wrapper string, changed map[string
 // The precedent is computed from edges that do not originate in the change, so
 // the change cannot vouch for itself.
 func LayerCrossings(g *Graph, changed []Node, nc NewCallees) []Finding {
-	changedIDs := map[string]bool{}
-	for _, n := range changed {
-		changedIDs[n.ID] = true
-	}
+	changedIDs := idSet(changed)
 
-	precedent := map[string]int{}
-	for _, e := range g.Edges {
-		if e.Kind != "calls" && e.Kind != "instantiates" {
-			continue
-		}
-		if changedIDs[e.Source] {
-			continue
-		}
-		src, sok := g.Nodes[e.Source]
-		dst, dok := g.Nodes[e.Target]
-		if !sok || !dok || isTestFile(src.File) {
-			continue
-		}
-		if src.Dir() == dst.Dir() {
-			continue
-		}
-		precedent[src.Dir()+"->"+dst.Dir()]++
-	}
-
+	precedent := precedentEdges(g, changedIDs)
 	var out []Finding
 	seen := map[string]bool{}
 	for _, n := range changed {
@@ -193,62 +191,93 @@ func LayerCrossings(g *Graph, changed []Node, nc NewCallees) []Finding {
 // returning an error. A convention is only asserted when the neighbours are
 // overwhelmingly consistent about it, so a mixed directory says nothing.
 func SiblingDivergence(g *Graph, changed []Node, minSiblings int, minShare float64) []Finding {
-	byDir := map[string][]Node{}
-	for _, n := range g.Nodes {
-		if n.IsFunc() && !isTestFile(n.File) {
-			byDir[n.Dir()] = append(byDir[n.Dir()], n)
-		}
-	}
-
-	changedIDs := map[string]bool{}
-	for _, n := range changed {
-		changedIDs[n.ID] = true
-	}
-
-	conventions := []struct {
-		name  string
-		label string
-		holds func(Node) bool
-	}{
-		{"ctx-first", "a context.Context first parameter", takesContextFirst},
-		{"returns-error", "returning an error", returnsError},
-	}
+	byDir := funcsByDir(g)
+	changedIDs := idSet(changed)
 
 	var out []Finding
 	for _, n := range changed {
 		if !n.IsFunc() || isTestFile(n.File) || n.Signature == "" {
 			continue
 		}
-		siblings := make([]Node, 0, len(byDir[n.Dir()]))
-		for _, s := range byDir[n.Dir()] {
-			if s.ID != n.ID && !changedIDs[s.ID] && s.Signature != "" {
-				siblings = append(siblings, s)
-			}
-		}
+		siblings := siblingsOf(byDir[n.Dir()], n, changedIDs)
 		if len(siblings) < minSiblings {
 			continue
 		}
-		for _, c := range conventions {
-			if c.holds(n) {
-				continue
-			}
-			hold := 0
-			for _, s := range siblings {
-				if c.holds(s) {
-					hold++
-				}
-			}
-			share := float64(hold) / float64(len(siblings))
-			if share < minShare {
-				continue
-			}
-			out = append(out, Finding{
-				Rule: "sibling-divergence", Node: n,
-				Title: fmt.Sprintf("%s breaks a convention its neighbours in %s follow: %s", n.Label(), n.Dir(), c.label),
-				Detail: fmt.Sprintf("%d of %d functions in that directory do it (%.0f%%)",
-					len(siblings), hold, share*100),
-			})
+		out = append(out, divergences(n, siblings, minShare)...)
+	}
+	return out
+}
+
+// conventions are mechanical enough to check and common enough in Go to be
+// worth a reading. A convention is only asserted when the neighbours are
+// overwhelmingly consistent about it, so a mixed directory says nothing.
+var conventions = []struct {
+	name  string
+	label string
+	holds func(Node) bool
+}{
+	{"ctx-first", "a context.Context first parameter", takesContextFirst},
+	{"returns-error", "returning an error", returnsError},
+}
+
+func divergences(n Node, siblings []Node, minShare float64) []Finding {
+	var out []Finding
+	for _, c := range conventions {
+		if c.holds(n) {
+			continue
 		}
+		hold := countHolding(siblings, c.holds)
+		share := float64(hold) / float64(len(siblings))
+		if share < minShare {
+			continue
+		}
+		out = append(out, Finding{
+			Rule: "sibling-divergence", Node: n,
+			Title: fmt.Sprintf("%s breaks a convention its neighbours in %s follow: %s",
+				n.Label(), n.Dir(), c.label),
+			Detail: fmt.Sprintf("%d of %d functions in that directory do it (%.0f%%)",
+				hold, len(siblings), share*100),
+		})
+	}
+	return out
+}
+
+func countHolding(nodes []Node, holds func(Node) bool) int {
+	n := 0
+	for _, s := range nodes {
+		if holds(s) {
+			n++
+		}
+	}
+	return n
+}
+
+func funcsByDir(g *Graph) map[string][]Node {
+	out := map[string][]Node{}
+	for _, n := range g.Nodes {
+		if n.IsFunc() && !isTestFile(n.File) {
+			out[n.Dir()] = append(out[n.Dir()], n)
+		}
+	}
+	return out
+}
+
+// siblingsOf excludes the node itself and anything else the change touched: a
+// convention has to predate the change to be one.
+func siblingsOf(dir []Node, n Node, changed map[string]bool) []Node {
+	out := make([]Node, 0, len(dir))
+	for _, s := range dir {
+		if s.ID != n.ID && !changed[s.ID] && s.Signature != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func idSet(nodes []Node) map[string]bool {
+	out := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		out[n.ID] = true
 	}
 	return out
 }

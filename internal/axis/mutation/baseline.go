@@ -77,60 +77,57 @@ func RunBaseline(ctx context.Context, r *Runner, pkgs []string, workers, rounds 
 	if len(pkgs) == 0 {
 		return nil, errors.New("no packages with tests in scope")
 	}
-	if workers < 1 {
-		workers = 1
-	}
-	if rounds < 1 {
-		rounds = 1
-	}
+	workers = atLeast(workers, 1)
+	rounds = atLeast(rounds, 1)
 
 	b := &Baseline{Quarantine: map[string]bool{}, CoverPath: coverPath}
+	b.AllTests = listTests(ctx, r, pkgs)
 
-	// The quarantine is only enforceable if we know the full test list: Go's
-	// -run has no negation, so excluding a test means naming every other one.
-	// Without this the exclusion is computed and then silently ignored.
-	seen := map[string]bool{}
-	for _, p := range pkgs {
-		names, lerr := r.ListTests(ctx, p)
-		if lerr != nil {
-			continue
-		}
-		for _, n := range names {
-			if !seen[n] {
-				seen[n] = true
-				b.AllTests = append(b.AllTests, n)
-			}
-		}
+	failCount := map[string]int{}
+	if err := b.first(ctx, r, pkgs, timeout, coverPath, failCount); err != nil || b.Red {
+		return b, err
 	}
-	sort.Strings(b.AllTests)
+	if err := b.underLoad(ctx, r, pkgs, workers, rounds, timeout, failCount); err != nil {
+		return b, err
+	}
 
-	// The first run is sequential and carries coverage: a clean profile, and
-	// the reference duration the per-mutant timeout is derived from.
+	b.markRedIfAlwaysFailing(failCount, 1+(rounds-1)*workers)
+	return b, nil
+}
+
+// first runs the suite once, sequentially, carrying coverage. It produces the
+// clean profile and the reference duration the per-mutant timeout derives from.
+func (b *Baseline) first(ctx context.Context, r *Runner, pkgs []string,
+	timeout time.Duration, coverPath string, failCount map[string]int) error {
+
 	v, d := r.Test(ctx, Invocation{Packages: pkgs, Timeout: timeout, Cover: coverPath})
 	b.Duration = d
+
 	switch v.Outcome {
 	case Survived:
-		// clean
+		return nil
 	case Killed:
 		for _, t := range v.KilledBy {
 			b.Quarantine[t] = true
+			failCount[t]++
 		}
+		return nil
 	default:
 		b.Red = true
 		b.RedDetail = string(v.Outcome) + ": " + v.Detail
-		return b, nil
+		return nil
 	}
+}
 
-	failCount := map[string]int{}
-	for _, t := range v.KilledBy {
-		failCount[t]++
-	}
+// underLoad repeats the suite at the concurrency the mutant phase will use.
+// That is the entire point: a suite can pass five sequential runs and still
+// fail intermittently the moment several run at once.
+func (b *Baseline) underLoad(ctx context.Context, r *Runner, pkgs []string,
+	workers, rounds int, timeout time.Duration, failCount map[string]int) error {
 
-	// The remaining rounds run at the mutant phase's concurrency, which is what
-	// surfaces load-dependent flakiness.
 	for round := 1; round < rounds; round++ {
 		if err := ctx.Err(); err != nil {
-			return b, err
+			return err
 		}
 		var mu sync.Mutex
 		var wg sync.WaitGroup
@@ -154,22 +151,54 @@ func RunBaseline(ctx context.Context, r *Runner, pkgs []string, workers, rounds 
 		}
 		wg.Wait()
 	}
+	return nil
+}
 
-	// A test that failed every single time is not flaky — the suite is broken,
-	// and scoring against a red baseline makes every mutant look killed.
-	total := 1 + (rounds-1)*workers
+// markRedIfAlwaysFailing separates a flaky test from a broken suite. A test
+// that failed every single time is not flaky, and scoring against a red suite
+// makes every mutant look killed.
+func (b *Baseline) markRedIfAlwaysFailing(failCount map[string]int, total int) {
 	var always []string
 	for t, n := range failCount {
 		if n == total {
 			always = append(always, t)
 		}
 	}
-	if len(always) > 0 {
-		sort.Strings(always)
-		b.Red = true
-		b.RedDetail = "these tests fail every time on the unmutated suite: " + join(always, 5)
+	if len(always) == 0 {
+		return
 	}
-	return b, nil
+	sort.Strings(always)
+	b.Red = true
+	b.RedDetail = "these tests fail every time on the unmutated suite: " + join(always, 5)
+}
+
+// listTests enumerates the top-level tests. The quarantine is only enforceable
+// with the full list: Go's -run has no negation, so excluding a test means
+// naming every other one.
+func listTests(ctx context.Context, r *Runner, pkgs []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range pkgs {
+		names, err := r.ListTests(ctx, p)
+		if err != nil {
+			continue
+		}
+		for _, n := range names {
+			if !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func atLeast(v, min int) int {
+	if v < min {
+		return min
+	}
+	return v
 }
 
 func join(ss []string, max int) string {

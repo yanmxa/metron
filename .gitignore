@@ -1,4 +1,5 @@
-/metron
-/dist/
-.metron/
 .codegraph/
+.metron/
+/bin/
+/dist/
+/metron

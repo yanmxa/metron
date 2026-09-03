@@ -240,96 +240,142 @@ func testScope(pg *gopkg.Graph, targets map[string][]target.ChangedFile) []strin
 
 // generate loads each changed package with full type information and emits
 // mutants inside the functions the change touched.
-func (a *Axis) generate(ctx context.Context, t *target.Target, pg *gopkg.Graph,
+func (a *Axis) generate(ctx context.Context, t *target.Target, _ *gopkg.Graph,
 	targets map[string][]target.ChangedFile) ([]Mutant, map[string]int, error) {
+
+	loaded, err := loadForMutation(ctx, t.Root, targets)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	suppressed := map[string]int{}
 	var out []Mutant
-
-	paths := make([]string, 0, len(targets))
-	for ip := range targets {
-		paths = append(paths, ip)
-	}
-	sort.Strings(paths)
-
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
-			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedCompiledGoFiles,
-		Dir:     t.Root,
-		Context: ctx,
-	}
-	loaded, err := packages.Load(cfg, paths...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load packages: %w", err)
-	}
-
 	for _, p := range loaded {
 		files := targets[p.PkgPath]
 		if len(files) == 0 {
 			continue
 		}
-		changedByPath := map[string][]target.LineRange{}
-		for _, cf := range files {
-			changedByPath[cf.Path] = cf.Ranges
-		}
-
-		for i, syn := range p.Syntax {
-			if i >= len(p.CompiledGoFiles) {
-				break
-			}
-			abs := p.CompiledGoFiles[i]
-			rel, rerr := filepath.Rel(t.Root, abs)
-			if rerr != nil {
-				continue
-			}
-			rel = filepath.ToSlash(rel)
-			ranges, ok := changedByPath[rel]
-			if !ok || target.IsGenerated(syn) {
-				continue
-			}
-			src, serr := os.ReadFile(abs)
-			if serr != nil {
-				continue
-			}
-
-			var spans []FuncSpan
-			for _, d := range syn.Decls {
-				fd, ok := d.(*ast.FuncDecl)
-				if !ok || fd.Body == nil {
-					continue
-				}
-				start := p.Fset.Position(fd.Pos()).Line
-				end := p.Fset.Position(fd.End()).Line
-				touched := false
-				for _, rg := range ranges {
-					if rg.Overlaps(start, end) {
-						touched = true
-						break
-					}
-				}
-				if touched {
-					// Labelled the way target.Func does, so per-function
-					// readings from different axes line up.
-					label := fd.Name.Name
-					if recv := recvOf(fd); recv != "" {
-						label = "(" + recv + ")." + label
-					}
-					spans = append(spans, FuncSpan{
-						Label: label, Decl: fd, StartLine: start, EndLine: end,
-					})
-				}
-			}
-			if len(spans) == 0 {
-				continue
-			}
-			g := NewGenerator(p.Fset, p.TypesInfo, a.cfg.Operators)
-			out = append(out, g.Generate(rel, p.PkgPath, src, spans)...)
-			for k, v := range g.Suppressed {
-				suppressed[k] += v
-			}
+		ms, sup := a.generatePackage(t.Root, p, changedRanges(files))
+		out = append(out, ms...)
+		for k, v := range sup {
+			suppressed[k] += v
 		}
 	}
 	return out, suppressed, nil
+}
+
+// loadForMutation type-checks the changed packages. Types are what keep the
+// generator from emitting mutants that cannot compile.
+func loadForMutation(ctx context.Context, root string,
+	targets map[string][]target.ChangedFile) ([]*packages.Package, error) {
+
+	paths := make([]string, 0, len(targets))
+	for ip := range targets {
+		paths = append(paths, ip)
+	}
+	sort.Strings(paths) // a stable load order keeps mutant order stable
+
+	loaded, err := packages.Load(&packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
+			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedCompiledGoFiles,
+		Dir:     root,
+		Context: ctx,
+	}, paths...)
+	if err != nil {
+		return nil, fmt.Errorf("load packages: %w", err)
+	}
+	return loaded, nil
+}
+
+func changedRanges(files []target.ChangedFile) map[string][]target.LineRange {
+	out := make(map[string][]target.LineRange, len(files))
+	for _, cf := range files {
+		out[cf.Path] = cf.Ranges
+	}
+	return out
+}
+
+func (a *Axis) generatePackage(root string, p *packages.Package,
+	changed map[string][]target.LineRange) ([]Mutant, map[string]int) {
+
+	suppressed := map[string]int{}
+	var out []Mutant
+
+	for i, syn := range p.Syntax {
+		if i >= len(p.CompiledGoFiles) {
+			break
+		}
+		rel, ok := relativeTo(root, p.CompiledGoFiles[i])
+		if !ok {
+			continue
+		}
+		ranges, wanted := changed[rel]
+		if !wanted || target.IsGenerated(syn) {
+			continue
+		}
+		src, err := os.ReadFile(p.CompiledGoFiles[i])
+		if err != nil {
+			continue
+		}
+		spans := touchedFuncs(p, syn, ranges)
+		if len(spans) == 0 {
+			continue
+		}
+		g := NewGenerator(p.Fset, p.TypesInfo, a.cfg.Operators)
+		out = append(out, g.Generate(rel, p.PkgPath, src, spans)...)
+		for k, v := range g.Suppressed {
+			suppressed[k] += v
+		}
+	}
+	return out, suppressed
+}
+
+// touchedFuncs returns the functions whose extent overlaps a changed range.
+// Overlap rather than containment: a hunk that starts above a function and runs
+// into it still changed that function.
+func touchedFuncs(p *packages.Package, syn *ast.File, ranges []target.LineRange) []FuncSpan {
+	var spans []FuncSpan
+	for _, d := range syn.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Body == nil {
+			continue
+		}
+		start := p.Fset.Position(fd.Pos()).Line
+		end := p.Fset.Position(fd.End()).Line
+		if !overlapsAny(ranges, start, end) {
+			continue
+		}
+		spans = append(spans, FuncSpan{
+			Label: funcLabel(fd), Decl: fd, StartLine: start, EndLine: end,
+		})
+	}
+	return spans
+}
+
+func overlapsAny(ranges []target.LineRange, start, end int) bool {
+	for _, r := range ranges {
+		if r.Overlaps(start, end) {
+			return true
+		}
+	}
+	return false
+}
+
+// funcLabel names a function the way target.Func does, so per-function readings
+// from different axes line up.
+func funcLabel(fd *ast.FuncDecl) string {
+	if recv := recvOf(fd); recv != "" {
+		return "(" + recv + ")." + fd.Name.Name
+	}
+	return fd.Name.Name
+}
+
+func relativeTo(root, abs string) (string, bool) {
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 // planner builds the invocation for a mutant: the packages that can reach it,

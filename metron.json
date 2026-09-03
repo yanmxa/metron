@@ -1,0 +1,22 @@
+{
+  // metron measures itself in CI. These are the ranges it is held to.
+  //
+  // maxCognitive is a ratchet, not a target. It sits at this repository's
+  // current worst function, so today's complexity is tolerated and none of it
+  // may grow. Lower it whenever the worst function is split up — that is the
+  // only direction it is allowed to move.
+  //
+  // maxDelta is what makes that honest. Raising a limit to accommodate existing
+  // code is ratcheting; raising it to let a function get worse is surrender,
+  // and a delta of zero forbids the second.
+  "complexity": {
+    "maxCognitive": 30,
+    "maxDelta": 0
+  },
+
+  // The suite is fast, so there is no reason to accept a partial run.
+  "mutation": {
+    "minScore": 0.70,
+    "budget": "10m"
+  }
+}

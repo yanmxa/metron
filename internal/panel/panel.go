@@ -7,6 +7,7 @@ package panel
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/yanmxa/metron/internal/axis"
@@ -16,6 +17,9 @@ import (
 type Panel struct {
 	Target  *target.Target
 	Results []*axis.Result
+	// ConfigPath, when set, is named in the footer so a surprising reference
+	// range can be traced to the file that changed it.
+	ConfigPath string
 }
 
 // Render produces the terminal form.
@@ -126,6 +130,9 @@ func (p *Panel) footer(rows []row) string {
 	}
 	for _, n := range notes {
 		b.WriteString(" · " + n)
+	}
+	if p.ConfigPath != "" {
+		fmt.Fprintf(&b, " · ranges from %s", filepath.Base(p.ConfigPath))
 	}
 	b.WriteString("\n")
 
