@@ -128,7 +128,8 @@ range is genuinely wrong for this repository, say so and let the user change it.
 ## Reading the metrics
 
 Full definitions, worked examples and what each metric is for:
-[docs/metrics.md](../../../docs/metrics.md) in this repository, or the README.
+[docs/metrics.md](../../../docs/metrics.md) in this repository
+([简体中文](../../../docs/metrics.zh.md)), or the README.
 
 | reading | what it means when out of range |
 | --- | --- |

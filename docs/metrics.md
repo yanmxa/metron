@@ -1,5 +1,7 @@
 # What each metric means
 
+English · [简体中文](metrics.zh.md)
+
 Every reading here is deterministic: same commit in, same number out. Each
 section says what the metric is, how it is computed, what it is for, and shows
 a worked example with real output.

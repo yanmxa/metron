@@ -112,7 +112,7 @@ metron --all --axes complexity,graph
 ## 各项读数
 
 每个指标的完整定义、作用、含义,以及可复现的样例:
-**[docs/metrics.md](docs/metrics.md)**(英文)。
+**[docs/metrics.zh.md](docs/metrics.zh.md)**。
 
 表格里有七项读数,其中五项参与闸门。每一项下面都跟着支撑它的具体发现。
 
