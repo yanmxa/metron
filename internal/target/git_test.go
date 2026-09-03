@@ -1,6 +1,13 @@
 package target
 
-import "testing"
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseUnifiedDiffTakesTheNewSideOnly(t *testing.T) {
 	// Every axis measures the code as it now is, so only the new-side spans
@@ -125,5 +132,97 @@ func TestGoFilesExcludesDeletedAndNonGo(t *testing.T) {
 	}
 	if got[0].Path != "a.go" || got[1].Path != "b.go" {
 		t.Errorf("not sorted: %q, %q", got[0].Path, got[1].Path)
+	}
+}
+
+func TestUntrackedGoFilesAreIncluded(t *testing.T) {
+	// git diff cannot see a file that was never added, and new files are most
+	// of what an agent produces. Without this a change made entirely of new
+	// code measured as nothing changed and reported all clear.
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("tracked.go", "package p\n")
+	run("init", "-q", "-b", "main")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "t")
+	run("add", "-A")
+	run("commit", "-qm", "base")
+
+	write("brand_new.go", "package p\n\nfunc New() int { return 1 }\n")
+	write("notes.txt", "not Go, must be ignored\n")
+
+	tgt, err := Resolve(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var paths []string
+	for _, f := range tgt.Files {
+		paths = append(paths, f.Path)
+	}
+	if len(paths) != 1 || paths[0] != "brand_new.go" {
+		t.Fatalf("files = %v, want just brand_new.go", paths)
+	}
+	f := tgt.Files[0]
+	if f.Status != Added {
+		t.Errorf("status = %c, want A", f.Status)
+	}
+	if len(f.Ranges) != 1 || f.Ranges[0].Start != 1 || f.Ranges[0].End != 3 {
+		t.Errorf("ranges = %+v, want the whole file", f.Ranges)
+	}
+}
+
+func TestUntrackedAndModifiedFilesAppearTogetherAndSorted(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git: %v\n%s", err, out)
+		}
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("b_modified.go", "package p\n")
+	run("init", "-q", "-b", "main")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "t")
+	run("add", "-A")
+	run("commit", "-qm", "base")
+
+	write("b_modified.go", "package p\n\nfunc Changed() {}\n")
+	write("a_new.go", "package p\n\nfunc Added() {}\n")
+
+	tgt, err := Resolve(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tgt.Files) != 2 {
+		t.Fatalf("got %d files, want 2: %+v", len(tgt.Files), tgt.Files)
+	}
+	if tgt.Files[0].Path != "a_new.go" || tgt.Files[1].Path != "b_modified.go" {
+		t.Errorf("not sorted: %s, %s", tgt.Files[0].Path, tgt.Files[1].Path)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -45,6 +47,17 @@ func Resolve(ctx context.Context, dir, baseRef string) (*Target, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// git diff cannot see a file that was never added, and new files are most
+	// of what an agent produces. Left out, a change consisting entirely of new
+	// code measured as nothing changed and reported all clear.
+	untracked, err := untrackedGoFiles(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, untracked...)
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+
 	return &Target{
 		Root: root, BaseRef: baseRef, BaseSHA: base,
 		HeadDesc: "working tree", Files: files,
@@ -141,6 +154,34 @@ func parseHunkNewSide(hdr string) (start, count int, ok bool) {
 		}
 	}
 	return start, count, true
+}
+
+// untrackedGoFiles lists Go files git does not know about yet, as wholly added.
+//
+// Only Go files: an untracked build artefact or a stray note is not something
+// to measure, and including everything would make the file count meaningless.
+func untrackedGoFiles(ctx context.Context, root string) ([]ChangedFile, error) {
+	out, err := git(ctx, root, "ls-files", "--others", "--exclude-standard", "-z", "--", "*.go")
+	if err != nil {
+		return nil, fmt.Errorf("listing untracked files: %w", err)
+	}
+
+	var files []ChangedFile
+	for _, rel := range strings.Split(out, "\x00") {
+		if rel == "" {
+			continue
+		}
+		n, err := countFileLines(filepath.Join(root, rel))
+		if err != nil || n == 0 {
+			continue
+		}
+		files = append(files, ChangedFile{
+			Path:   filepath.ToSlash(rel),
+			Status: Added,
+			Ranges: []LineRange{{Start: 1, End: n}},
+		})
+	}
+	return files, nil
 }
 
 // ShowFile returns a file's contents at a revision. Missing paths come back as

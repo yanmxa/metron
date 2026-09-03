@@ -44,7 +44,7 @@ func ResolveAll(ctx context.Context, dir string) (*Target, error) {
 		if rerr != nil {
 			return nil
 		}
-		n, cerr := countLines(path)
+		n, cerr := countFileLines(path)
 		if cerr != nil || n == 0 {
 			return nil
 		}
@@ -69,7 +69,7 @@ func ResolveAll(ctx context.Context, dir string) (*Target, error) {
 	}, nil
 }
 
-func countLines(path string) (int, error) {
+func countFileLines(path string) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, err
