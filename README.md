@@ -2,25 +2,31 @@
 
 English · [简体中文](README.zh.md)
 
-A lab report for a code change: seven readings, each against a reference range,
-with an exit code you can gate on.
+**Measures what an AI agent just wrote, against explicit metrics, and hands it
+back a concrete instruction for every gap it finds.**
 
-**No LLM, no network, no API key.** Every number comes from parsing your code and
-running your tests. Same commit in, same numbers out.
+Agents produce code that passes review and does not hold. They write tests that
+execute every line and assert nothing. They pile branches into a function instead
+of extracting one. They rewrite a helper that already exists because they could
+not find it. None of that shows up in a diff, and none of it shows up in coverage.
 
-## The problem, in one example
+metron measures it, then says what to do about it — in terms an agent can act on
+and re-verify.
+
+**No LLM, no network, no API key.** Every number comes from parsing the code and
+running its tests. Same commit in, same numbers out — which is what makes it safe
+to put in a loop, and safe to gate on.
+
+## The loop
+
+An agent has just written `Discount` and a test for it. The test covers **100% of
+statements**.
 
 ```
 $ metron --since main --axes all
 
-  METRON  main · 1 files · 18+
-
   reading            value   reference
   ─────────────────────────────────────
-  cognitive max         3   ≤ 15      ✓    Discount
-  cognitive Δ           0   = 0       ✓
-  redundant code        0   = 0       ✓
-  inconsistent code     0   = 0       ✓
   mutation score      20%   ≥ 70%     L
     test strength     20%   ≥ 80%     L    12 of 15 mutants survived
     reach            100%   ≥ 85%     ✓    every mutant was executed
@@ -28,38 +34,55 @@ $ metron --since main --axes all
   2 out of range
 
   mutation
-    pricing/pricing.go:9  no test caught this change to Discount (CONDITION_FORCE)
-      - if total < 0 {
-      + if true {
     pricing/pricing.go:9  no test caught this change to Discount (CONDITIONALS_BOUNDARY)
       - if total < 0 {
       + if total <= 0 {
-    …
+      assert the behaviour at the boundary total == 0
 ```
 
-**That code has 100% line coverage.** It scores 20. Replace the test with one that
-actually asserts and it scores 100, at the same 100% coverage.
+Reach is 100%: the tests really do run every line. Strength is 20%: they run it
+and check almost nothing. And the last line is not a complaint — it is a task.
+Every surviving mutant carries the assertion it proves is missing, derived from
+the operator and its operands.
 
-The two indented readings say *which* problem it is. Reach is 100%, so the tests
-do execute the code. Strength is 20%, so they execute it and check nothing.
-
-## Install and run
+The agent acts on those instructions and runs metron again:
 
 ```
-go install github.com/yanmxa/metron/cmd/metron@latest
+  mutation score     100%   ≥ 70%     ✓
+    test strength    100%   ≥ 80%     ✓    0 of 15 mutants survived
+    reach            100%   ≥ 85%     ✓    every mutant was executed
 
-cd your-repo
-metron --since main                 # complexity + graph, about a second
-metron --since main --axes all      # adds mutation: runs your test suite
+  all within range
 ```
 
-Needs Go 1.26+ and a git repository. The graph axis also needs a
-[CodeGraph](https://github.com/colbymchenry/codegraph) index — `codegraph init`
-enables it. Without one that axis reports `n/a` and says why, rather than quietly
-passing.
+Exit 0. Coverage was 100% before and after; only metron could tell the two apart.
 
-Exit codes: `0` all within range · `1` error · `2` a reading out of range ·
-`3` budget spent, readings cover only a sample.
+## Wiring it into an agent
+
+```
+metron --since main --axes all --format json
+```
+
+Three things make it usable inside a loop:
+
+- **`detail` on every finding is an instruction**, not a diagnosis — "assert the
+  behaviour at the boundary `total == 0`", not "coverage is low".
+- **Exit codes are the stop condition.** `0` done · `2` something still out of
+  range · `3` incomplete, do not treat as pass · `1` error.
+- **Re-running is cheap.** Verdicts are content-addressed and cached, so an
+  iteration that changes one function does not re-measure the rest: 8.3s cold,
+  0.26s fully cached.
+
+Give the agent a rule and it can close the loop itself:
+
+```markdown
+After changing Go code, run `metron --since main --axes all --format json`.
+For every finding, do what its `detail` says, then run it again.
+Stop when the exit code is 0. Never edit metron's thresholds to make it pass.
+```
+
+That last sentence matters. The gate is only worth having if the agent cannot
+move it.
 
 ## The readings
 

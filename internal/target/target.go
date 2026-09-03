@@ -75,6 +75,10 @@ type Target struct {
 	BaseSHA  string // the resolved merge-base
 	HeadDesc string // human description of the head side ("working tree" or a SHA)
 	Files    []ChangedFile
+	// WholeRepo marks a target with no base revision. Readings that compare
+	// against one — how much a function got worse, whether a dependency is new
+	// — cannot be taken, and say so rather than guessing.
+	WholeRepo bool
 }
 
 // GoFiles returns the changed files that are Go source and still exist,
@@ -92,5 +96,8 @@ func (t *Target) GoFiles() []ChangedFile {
 }
 
 func (t *Target) Describe() string {
+	if t.WholeRepo {
+		return fmt.Sprintf("%s · %d files", t.HeadDesc, len(t.Files))
+	}
 	return fmt.Sprintf("%s...%s · %d files", t.BaseRef, t.HeadDesc, len(t.Files))
 }

@@ -39,21 +39,28 @@ func run() error {
 		budget   = flag.Duration("budget", 5*time.Minute, "wall-clock budget for the mutation axis")
 		paranoid = flag.Bool("paranoid", false, "re-run every killed mutant sequentially before believing it")
 		fresh    = flag.Bool("fresh", false, "ignore any checkpoint and re-measure from scratch")
+		all      = flag.Bool("all", false, "measure the whole repository instead of one change; readings that need a base revision report as unmeasured")
 	)
 	flag.Usage = usage
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	var err error
 
-	t, err := target.Resolve(ctx, *dir, *since)
+	var t *target.Target
+	if *all {
+		t, err = target.ResolveAll(ctx, *dir)
+	} else {
+		t, err = target.Resolve(ctx, *dir, *since)
+	}
 	if err != nil {
 		return err
 	}
 
-	axes, err := buildAxes(*axesFlag, *budget, *paranoid, *fresh)
-	if err != nil {
-		return err
+	axes, aerr := buildAxes(*axesFlag, *budget, *paranoid, *fresh)
+	if aerr != nil {
+		return aerr
 	}
 
 	var results []*axis.Result

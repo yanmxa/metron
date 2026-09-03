@@ -28,8 +28,11 @@ func (p *Panel) Render() string {
 			added += r.End - r.Start + 1
 		}
 	}
-	fmt.Fprintf(&b, "\n  METRON  %s · %d files · %d+\n\n",
-		p.Target.BaseRef, len(p.Target.Files), added)
+	label := p.Target.BaseRef
+	if p.Target.WholeRepo {
+		label = p.Target.HeadDesc
+	}
+	fmt.Fprintf(&b, "\n  METRON  %s · %d files · %d+\n\n", label, len(p.Target.Files), added)
 	_ = removed
 
 	rows := p.rows()

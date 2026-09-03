@@ -88,9 +88,16 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 	orphans := Orphans(g, changed, iu, iu.AppPackage)
 	dups := append(NearDuplicates(g, changed, a.cfg.Thresholds),
 		Reimplementations(g, changed, a.cfg.Thresholds)...)
-	bypassed := BypassedWrappers(g, changed, newCallees, a.cfg.Thresholds)
-	crossings := LayerCrossings(g, changed, newCallees)
 	divergence := SiblingDivergence(g, changed, a.cfg.MinSiblings, a.cfg.MinShare)
+
+	// Bypassing and unprecedented dependencies are both questions about edges
+	// the change drew. With no base revision every edge looks new, so they are
+	// not asked at all rather than answered with noise.
+	var bypassed, crossings []Finding
+	if !t.WholeRepo {
+		bypassed = BypassedWrappers(g, changed, newCallees, a.cfg.Thresholds)
+		crossings = LayerCrossings(g, changed, newCallees)
+	}
 
 	// Two readings, not five. Orphans and duplicates both mean the code did not
 	// need to exist as written; the three consistency rules all mean it does not
@@ -110,13 +117,25 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 	redundant := len(orphans) + len(dups)
 	inconsistent := len(bypassed) + len(crossings) + len(divergence)
 
+	inconsistentM := count("graph.inconsistent", "inconsistent code", inconsistent,
+		breakdown("bypassed a wrapper", len(bypassed),
+			"new dependency direction", len(crossings),
+			"broke a local convention", len(divergence)))
+	if t.WholeRepo {
+		// Only one of the three rules could run. Reporting the partial count
+		// under the same label would let a repository riddled with bypassed
+		// wrappers read as clean.
+		inconsistentM = axis.Measure{
+			Key: "graph.inconsistent", Label: "inconsistent code", Headline: true,
+			Status: axis.StatusUnmeasured,
+			Note:   "needs a base revision; only convention drift was checked",
+		}
+	}
+
 	r.Measures = []axis.Measure{
 		count("graph.redundant", "redundant code", redundant,
 			breakdown("unreachable", len(orphans), "duplicated", len(dups))),
-		count("graph.inconsistent", "inconsistent code", inconsistent,
-			breakdown("bypassed a wrapper", len(bypassed),
-				"new dependency direction", len(crossings),
-				"broke a local convention", len(divergence))),
+		inconsistentM,
 	}
 	r.Diagnostics = map[string]float64{
 		"graph.orphans":            float64(len(orphans)),

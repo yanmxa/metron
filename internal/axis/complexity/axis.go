@@ -70,7 +70,7 @@ func (a *Axis) Run(ctx context.Context, t *target.Target, prog chan<- axis.Progr
 		scores = append(scores, fs...)
 	}
 
-	return a.aggregate(scores), nil
+	return a.aggregate(scores, t.WholeRepo), nil
 }
 
 func (a *Axis) scoreFile(ctx context.Context, t *target.Target, cf target.ChangedFile) ([]FuncScore, error) {
@@ -144,6 +144,9 @@ func (a *Axis) scoreFile(ctx context.Context, t *target.Target, cf target.Change
 // the change created it, so every function in it is new — that is a fact worth
 // knowing, not an error.
 func (a *Axis) baseScores(ctx context.Context, t *target.Target, cf target.ChangedFile) (map[string]Score, error) {
+	if t.BaseSHA == "" {
+		return map[string]Score{}, nil // nothing to compare against
+	}
 	path := cf.Path
 	if cf.Status == target.Renamed && cf.OldPath != "" {
 		path = cf.OldPath
@@ -172,7 +175,7 @@ func (a *Axis) baseScores(ctx context.Context, t *target.Target, cf target.Chang
 	return out, nil
 }
 
-func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
+func (a *Axis) aggregate(scores []FuncScore, wholeRepo bool) *axis.Result {
 	r := &axis.Result{AxisID: "complexity"}
 	if len(scores) == 0 {
 		r.Measures = []axis.Measure{{
@@ -208,6 +211,23 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 
 	hiCog := float64(a.cfg.MaxCognitive)
 	hiDelta := float64(a.cfg.MaxDelta)
+	deltaStatus := statusFor(float64(maxDelta) <= hiDelta)
+
+	// Without a base revision there is nothing to have got worse against, so the
+	// delta is absent rather than reported as a comfortable zero.
+	delta := axis.Measure{
+		// The reading this axis exists for: agents pile branches into an
+		// existing function instead of extracting a new one.
+		Key: "complexity.delta_max", Label: "cognitive \u0394",
+		Value: float64(maxDelta), Unit: axis.UnitDelta,
+		RefHigh: &hiDelta, Headline: true, Status: deltaStatus, Note: deltaAt,
+	}
+	if wholeRepo {
+		delta = axis.Measure{
+			Key: "complexity.delta_max", Label: "cognitive \u0394", Headline: true,
+			Status: axis.StatusUnmeasured, Note: "no base revision to compare against",
+		}
+	}
 
 	r.Measures = []axis.Measure{
 		{
@@ -219,15 +239,7 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 			// function is named even when it sits inside the range.
 			Note: cogAt,
 		},
-		{
-			// The reading this axis exists for: agents pile branches into an
-			// existing function instead of extracting a new one.
-			Key: "complexity.delta_max", Label: "cognitive \u0394",
-			Value: float64(maxDelta), Unit: axis.UnitDelta,
-			RefHigh: &hiDelta, Headline: true,
-			Status: statusFor(float64(maxDelta) <= hiDelta),
-			Note:   deltaAt,
-		},
+		delta,
 	}
 	// Everything the axis measured, whether or not it earns a row. Cyclomatic
 	// complexity in particular is computed for every changed function and shown
@@ -243,7 +255,7 @@ func (a *Axis) aggregate(scores []FuncScore) *axis.Result {
 		"complexity.functions":         float64(len(scores)),
 	}
 
-	r.Observations = a.observations(scores)
+	r.Observations = a.observations(scores, wholeRepo)
 	r.Funcs = perFunc(scores)
 	return r
 }
@@ -266,10 +278,10 @@ func perFunc(scores []FuncScore) []axis.PerFunc {
 
 // observations reports the functions worth looking at: anything over the
 // range, and anything that got worse. Sorted by how much attention it deserves.
-func (a *Axis) observations(scores []FuncScore) []axis.Observation {
+func (a *Axis) observations(scores []FuncScore, wholeRepo bool) []axis.Observation {
 	var interesting []FuncScore
 	for _, s := range scores {
-		if s.Score.Adjusted > a.cfg.MaxCognitive || s.Delta > a.cfg.MaxDelta {
+		if s.Score.Adjusted > a.cfg.MaxCognitive || (!wholeRepo && s.Delta > a.cfg.MaxDelta) {
 			interesting = append(interesting, s)
 		}
 	}
@@ -290,6 +302,9 @@ func (a *Axis) observations(scores []FuncScore) []axis.Observation {
 			s.Score.Cyclomatic, s.Score.Lines, s.Score.FanOut)
 		title := s.Fn.Label()
 		switch {
+		case wholeRepo:
+			// Everything looks new without a base revision; saying so would be
+			// noise rather than information.
 		case s.IsNew:
 			title += " (new)"
 		case s.Delta > 0:
