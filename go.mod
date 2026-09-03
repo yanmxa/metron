@@ -1,6 +1,6 @@
 module github.com/yanmxa/metron
 
-go 1.26.2
+go 1.26
 
 require (
 	golang.org/x/tools v0.49.0
