@@ -1,0 +1,33 @@
+name: False finding
+description: metron reported something that is not actually a problem
+labels: [false-positive]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every rule in the graph axis was tightened after a real misfire, and this
+        is how that happens. The standard the rules are held to: six no-op edits
+        to a repository must produce zero findings.
+  - type: input
+    id: reading
+    attributes:
+      label: Which reading
+      placeholder: graph.redundant / complexity.cognitive_max / mutation.score
+    validations: {required: true}
+  - type: textarea
+    id: finding
+    attributes:
+      label: What it reported
+      render: text
+    validations: {required: true}
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is not a problem
+      description: What about this code makes the finding wrong?
+    validations: {required: true}
+  - type: textarea
+    id: code
+    attributes:
+      label: The smallest code that reproduces it
+      render: go

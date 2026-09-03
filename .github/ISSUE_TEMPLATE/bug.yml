@@ -1,0 +1,35 @@
+name: Bug report
+description: A reading is wrong, or metron did something unexpected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If a **reading looks wrong**, the most useful thing you can attach is the
+        output of `metron ... --format json`. A finding metron reports that is not
+        real, or one it misses, is the kind of bug worth the most here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What metron reported, and what you expected instead.
+    validations: {required: true}
+  - type: textarea
+    id: repro
+    attributes:
+      label: The command you ran
+      render: shell
+      placeholder: metron --since main --axes all
+    validations: {required: true}
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Ideally `--format json`. Redact anything you need to.
+      render: json
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `metron --version` and `go version`.
+    validations: {required: true}
