@@ -36,12 +36,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      # v8 installs golangci-lint v2, which is what .golangci.yml is written
-      # for. v6 installs v1, and v1 refuses a config targeting a newer Go than
-      # it was built with.
-      - uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.6.2
+          cache: true
+
+      # Built with the toolchain that is already here rather than downloaded as
+      # a release binary. golangci-lint refuses a module targeting a newer Go
+      # than the linter itself was compiled with, and no published build tracks
+      # a just-released Go closely enough to rely on.
+      - name: install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - run: golangci-lint run --timeout 5m
 
   dogfood:
     # metron measures itself. A tool that reports on code quality has no
