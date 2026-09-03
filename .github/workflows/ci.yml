@@ -36,9 +36,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - uses: golangci/golangci-lint-action@v6
+      # v8 installs golangci-lint v2, which is what .golangci.yml is written
+      # for. v6 installs v1, and v1 refuses a config targeting a newer Go than
+      # it was built with.
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.6.2
 
   dogfood:
     # metron measures itself. A tool that reports on code quality has no
