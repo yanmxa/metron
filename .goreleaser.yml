@@ -14,7 +14,11 @@ builds:
       - -s -w -X main.version={{.Version}}
 
 archives:
-  - formats: [tar.gz]
+  # No version in the name, so install.sh can fetch
+  # releases/latest/download/metron_<os>_<arch>.tar.gz without first asking
+  # what the latest version is.
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]

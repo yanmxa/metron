@@ -2,7 +2,7 @@
 
 Notable changes. This project follows [semantic versioning](https://semver.org).
 
-## v0.1.0 — unreleased
+## v0.1.0
 
 First tagged release.
 
