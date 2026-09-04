@@ -116,6 +116,64 @@ Computed over `go/ast` per the SonarSource specification: every construct that
 breaks linear flow costs 1, plus 1 more for each level of nesting it sits
 inside. Reference range: **≤ 15** for the worst changed function.
 
+### The exact rules
+
+Two things are added up: a **flat cost** for each construct that breaks linear
+flow, and a **nesting cost** equal to how many levels deep that construct sits.
+
+| construct | flat | nesting surcharge | raises nesting for its body |
+| --- | --- | --- | --- |
+| `if` | +1 | yes | yes |
+| `else if` | +1 | **no** | yes |
+| `else` | +1 | **no** | yes |
+| `for`, `range` | +1 | yes | yes |
+| `switch`, type switch | +1 | yes | yes |
+| `select` | +1 | yes | yes |
+| a run of `&&` or `\|\|` | +1 per run | no | no |
+| `break`/`continue` **to a label** | +1 | no | — |
+| direct recursion | +1 | no | — |
+| a function literal | 0 | — | **yes** |
+| plain `break`/`continue`, `case`, `defer`, `go` | 0 | — | — |
+
+`else` and `else if` take a flat cost because the reader is already inside the
+conditional; charging the nesting surcharge again would bill them twice for the
+same decision.
+
+A *run* means consecutive like operators: `a && b && c` is one idea and costs 1,
+while `a && b || c` switches mode and costs 2.
+
+A function literal costs nothing itself — writing a closure is not a decision —
+but its body is read one level deeper, so everything inside it pays more.
+
+### Worked count
+
+```go
+func f(a, b int, xs []int) int {      // running total
+	if a > b && a < 10 {              // if +1+0, && run +1        = 2
+		for _, x := range xs {        // for +1+1                  = 4
+			if x > 0 {                // if +1+2                   = 7
+				return x
+			}
+		}
+	} else {                          // else +1 flat              = 8
+		return 0
+	}
+	return -1
+}
+```
+
+Cognitive complexity **8**. Cyclomatic complexity for the same function is 5.
+
+### One deliberate divergence
+
+The specification raises the nesting level inside an `else` body;
+[gocognit](https://github.com/uudashr/gocognit) does not. metron follows the
+specification, because code inside an `else` really is one level deeper for the
+reader.
+
+Cross-checked against gocognit over all 528 functions in `spf13/cobra`: **523
+agree exactly**, and all five that differ are this one rule.
+
 ### Why it exists, and why not cyclomatic complexity
 
 Cyclomatic complexity counts decisions. It cannot distinguish three decisions in
@@ -148,13 +206,31 @@ experience of reading them.
 
 `if err != nil { return err }` is 7.7% of every branch keyword in the Go
 standard library and more in application code. A Go reader takes it as one
-token, not a branch. Counting it in full makes every Go function look complex
-and the metric stops discriminating, so metron discounts it — but only when the
-guard purely bails out. Anything with an `else`, or that handles the error, is a
-real branch and is counted.
+token, not a branch. Counting it in full makes every Go function look complex and
+the metric stops discriminating, so metron discounts it.
 
-The undiscounted score stays in `--format json` as
-`complexity.cognitive_raw_max`, comparable with gocognit.
+The discount is narrow on purpose. **All five conditions must hold**, or the `if`
+is a real branch and costs full price:
+
+1. the condition is `X != nil`, with `nil` written literally
+2. `X` is a plain identifier named `err` or `e`, or ending in `Err` or `Error`
+3. there is no `else`
+4. the body holds **exactly one** statement
+5. that statement is a `return`, or a `break`/`continue`
+
+So `if err != nil { return err }` is discounted, and each of these is not:
+
+```go
+if err != nil { log.Print(err); return err }   // two statements: real handling
+if err != nil { return err } else { … }        // has an else
+if problem != nil { return problem }           // name matches no error convention
+if err == nil { … }                            // not a guard
+```
+
+Condition 2 is a naming heuristic, and it is the one that can surprise you: an
+error variable called something else pays full price. The raw score is the
+appeal — it is in `--format json` as `complexity.cognitive_raw_max`, discounts
+nothing, and stays comparable with gocognit.
 
 ### What you can do with it
 
